@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Design stage only. There is no Go code, `go.mod`, build tooling, or tests yet, so there are no build/lint/test commands to document. Update this file once the module exists.
 
-The design lives in `docs/architecture.md` (Mermaid diagrams of the write and read paths). Read it before implementing anything.
+The design lives in `docs/write-path.md` and `docs/read-path.md` (Mermaid diagrams). Read them before implementing anything.
 
 ## Intended architecture (from the design discussion)
 
