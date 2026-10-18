@@ -4,7 +4,7 @@ Design for ~1k hits/sec: a stateless Go API service. Redis holds the 7-day dedup
 
 See also [write-path.md](write-path.md).
 
-Every accepted hit is already in Postgres, so there is no local delta to add. Reads never aggregate in Postgres on each request: totals, series and top-N are served from the Redis cache, and Postgres is only queried on a miss. Counts can therefore lag by up to the cache TTL.
+Postgres lags the write path by up to the ~1s flush interval, and the service adds no local delta. Reads never aggregate in Postgres on each request: totals, series and top-N are served from the Redis cache, and Postgres is only queried on a miss. Counts can therefore lag by up to the flush interval plus the cache TTL.
 
 ```mermaid
 flowchart TD
