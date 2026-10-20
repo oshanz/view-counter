@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build and start the service, run a k6 script against it, then stop it.
-# Usage: loadtest/run.sh loadtest/load.js
+# Usage: loadtest/run.sh loadtest/stress.js
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

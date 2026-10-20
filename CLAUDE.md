@@ -7,11 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Implemented. Tool versions are pinned in `mise.toml` (Go 1.25.0); Postgres runs via `docker-compose.yml` on host port 5433 and applies `migrations/` on first start.
 
 - `mise run db` starts Postgres, `mise run run` starts the service on `:8080`, `mise run test` runs tests (none written yet).
-- k6 (pinned in `mise.toml`) non-functional tests live in `loadtest/`: `mise run loadtest` (1 write/s + 1 read/s for 60s, exact count check; `DURATION_S=3600` for a soak) and `mise run stress` (ramp to 200 writes/s and 50 reads/s, mostly on one hot key). Both start the service themselves.
+- k6 (pinned in `mise.toml`) non-functional tests live in `loadtest/`: `mise run stress` (ramp to 200 writes/s and 50 reads/s, mostly on one hot key). It starts the service itself.
 - Env: `HMAC_SECRET` (required, dev default in `mise.toml`), `DATABASE_URL`, `ADDR`.
 - To reset the schema: `docker compose down -v`.
 
-The design lives in `docs/write-path.md` and `docs/read-path.md` (Mermaid diagrams).
+The design lives in `docs/postgres-only-benchmark.md` (Mermaid diagrams, decisions, stress test results).
 
 ## Intended architecture
 
