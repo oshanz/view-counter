@@ -1,0 +1,18 @@
+[tools]
+go = "1.25.0"
+
+[env]
+HMAC_SECRET = "dev-secret-change-me"
+
+[tasks.db]
+description = "Start Postgres"
+run = "docker compose up -d --wait"
+
+[tasks.run]
+description = "Run the service"
+depends = ["db"]
+run = "go run ./cmd/viewcounter"
+
+[tasks.test]
+description = "Run tests"
+run = "go test ./..."

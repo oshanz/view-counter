@@ -4,9 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Design stage only. There is no Go code, `go.mod`, build tooling, or tests yet, so there are no build/lint/test commands to document. Update this file once the module exists.
+Implemented. Tool versions are pinned in `mise.toml` (Go 1.25.0); Postgres runs via `docker-compose.yml` on host port 5433 and applies `migrations/` on first start.
 
-The design lives in `docs/write-path.md` and `docs/read-path.md` (Mermaid diagrams). Read them before implementing anything.
+- `mise run db` starts Postgres, `mise run run` starts the service on `:8080`, `mise run test` runs tests (none written yet).
+- Env: `HMAC_SECRET` (required, dev default in `mise.toml`), `DATABASE_URL`, `ADDR`.
+- To reset the schema: `docker compose down -v`.
+
+The design lives in `docs/write-path.md` and `docs/read-path.md` (Mermaid diagrams).
 
 ## Intended architecture
 
@@ -16,7 +20,7 @@ A Go page-view-counting API service sized for ~1 write/sec and ~1 read/sec. Keep
 - **Read path:** `GET /v1/views` (total, or daily series with `from`/`to`) and `GET /v1/top` query Postgres directly with a ~2s statement timeout. No cache.
 - **No** Redis, queues, in-memory counters, batching, flush loops, sharding or cardinality caps. If volume grows, add batching in front of the same schema.
 
-Planned layout: `cmd/viewcounter/` (wiring, env config, graceful shutdown), `internal/api/`, `internal/store/`, `migrations/`.
+Layout: `cmd/viewcounter/` (wiring, env config, graceful shutdown), `internal/api/`, `internal/store/`, `migrations/`.
 
 ## Decisions made (override only if the user says so)
 
