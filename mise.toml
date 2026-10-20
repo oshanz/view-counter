@@ -1,5 +1,6 @@
 [tools]
 go = "1.25.0"
+k6 = "2.3.0"
 
 [env]
 HMAC_SECRET = "dev-secret-change-me"
@@ -16,3 +17,13 @@ run = "go run ./cmd/viewcounter"
 [tasks.test]
 description = "Run tests"
 run = "go test ./..."
+
+[tasks.loadtest]
+description = "k6 baseline at 1 write/s and 1 read/s (DURATION_S=3600 for a soak)"
+depends = ["db"]
+run = "loadtest/run.sh loadtest/load.js"
+
+[tasks.stress]
+description = "k6 ramp to 200 writes/s and 50 reads/s on a hot key"
+depends = ["db"]
+run = "loadtest/run.sh loadtest/stress.js"
