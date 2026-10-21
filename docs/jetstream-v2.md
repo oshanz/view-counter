@@ -46,8 +46,8 @@ flowchart TD
 
 | Endpoint | Behavior |
 |---|---|
-| `GET /v2/views` | Same handler as `/v1/views`. Reads Postgres directly. |
-| `GET /v2/top` | Same handler as `/v1/top`. |
+| `GET /v2/views` | A total is a single-row read of `page_totals`. A daily series (`from`/`to`) uses the `/v1` handler and reads `page_views`. |
+| `GET /v2/top` | Top keys from `page_totals` through its `(views DESC, key)` index. |
 | `GET /v2/ingest` | `{"pending": N, "ack_pending": M}`: hits published but not yet delivered to the writer, and hits delivered but not yet committed. |
 
 ```mermaid
@@ -55,12 +55,12 @@ flowchart LR
     C[Client]
 
     subgraph API["Go service"]
-        V["GET /v2/views<br/>(handler shared with /v1)"]
-        T["GET /v2/top<br/>(handler shared with /v1)"]
+        V["GET /v2/views<br/>total: page_totals<br/>series: shared /v1 handler"]
+        T["GET /v2/top"]
         I["GET /v2/ingest"]
     end
 
-    PG[("Postgres<br/>page_views(key, day, views)")]
+    PG[("Postgres<br/>page_totals(key, views)<br/>page_views(key, day, views)")]
     JS[["JetStream HITS<br/>consumer info"]]
 
     C --> V
@@ -84,7 +84,7 @@ Counts lag by the stream backlog plus up to 250ms of fetch wait plus the transac
 
 ### Database tables
 
-`/v2` uses the same three tables as `/v1`; the writer touches all of them in one transaction per batch.
+`/v2` uses the same `seen` and `page_views` tables as `/v1` plus `page_totals`. The writer touches all three in one transaction per batch. `/v1` never reads or writes `page_totals`, so hits counted through `/v1` are not in it.
 
 ```mermaid
 erDiagram
@@ -103,7 +103,7 @@ erDiagram
         bigint views "all-time count, indexed (views DESC, key)"
     }
     seen }o..o{ page_views : "same key, no foreign key"
-    page_views }o..o{ page_totals : "same key, kept in step by the writers"
+    page_views }o..o{ page_totals : "same key, kept in step by the /v2 writer only"
 ```
 
 ## Design decisions
@@ -187,12 +187,21 @@ This does not prove 10k reads/s in production:
 
 Finding the ceiling: `STEPS=20000,30000,50000 STOP_ON_FAIL=1 MAX_VUS=10000 mise run stress-views`. The 20k step failed within 3 seconds. k6 offered 20,000 reads/s but completed about 10,600/s, dropped about a quarter of the offered requests, and p95 rose to 246ms with no failed requests. On this machine the ceiling is therefore about 10 to 11k reads/s. The 30k and 50k steps were never reached. This run does not show whether the service, Postgres or k6 itself is the limit, since all three share the host.
 
+Both runs above were before `page_totals` (`migrations/002_page_totals.sql`). After adding it and applying the migration to the dev database, `STEPS=10000,15000,20000,30000,50000 STOP_ON_FAIL=1 MAX_VUS=10000` gave:
+
+| Offered reads/s | p95 | Failed | Dropped | Result |
+|---|---|---|---|---|
+| 10,000 | 80ms | 0 | 1,488 (0.7%) | pass |
+| 15,000 | 218ms | 0 | 3,966 (over the 3,000 allowed) | fail, run stopped |
+
+The ceiling did not move, and 10k looked slightly worse than the first run (p95 14ms, nothing dropped). The dev database also had 47,711 keys by then, against far fewer in the first run, so the two are not directly comparable. `Total` was already a one-row read on the test's hot key, so `page_totals` had nothing to remove here. It should matter for keys with long histories and for `/v2/top`, neither of which this test exercises. The limit is more likely per-request overhead, the connection pool or k6 sharing the host.
+
 ## Limits and not yet measured
 
 - **Write load not tested.** `loadtest/stress.js` targets `/v1/hit`; `loadtest/views.js` covers reads only. Before relying on 10k writes/s, add a path switch to the k6 script, reset the database first, preload a realistic data set, and run k6 from a separate machine (the same gaps listed in the benchmark doc).
 - **Single NATS node, one replica.** For durability across node loss run a 3 node cluster and set `Replicas: 3` on the stream. Acked writes are replicated to a quorum but not necessarily fsynced at once; check JetStream's `sync_interval` for your version if a simultaneous power loss is a concern.
 - **One stream is one Raft group** on a cluster, so one leader takes all publishes. If that saturates, split into several streams by hash of the key.
 - **Single writer loop per instance.** One goroutine fetches and writes batches. If Postgres, not the loop, is the limit, add instances. If the loop is the limit, run more consumers on the same durable consumer.
-- **Reads are unchanged.** `/v2` does nothing for read capacity. `GET /v2/views` held 10k reads/s in the load test above, but on a small data set with a hot key and no concurrent writes, and `/v2/top` was not tested. `page_totals` (all-time sum per key, updated in the write transaction) now serves `Total` and `Top`, but it did not move the ceiling: with the small test data, `Total` was already a one-row read. The other option, an in-process cache with `singleflight`, is not implemented.
+- **Read capacity is unchanged.** `/v2` does nothing for read capacity. `GET /v2/views` held 10k reads/s in the load test above, but on a small data set with a hot key and no concurrent writes, and `/v2/top` was not tested. `page_totals` (all-time sum per key, updated by the `/v2` writer in its transaction) now serves `/v2` totals and top, but it did not move the ceiling: with the small test data, `Total` was already a one-row read. The other option, an in-process cache with `singleflight`, is not implemented.
 - **Callers cannot tell a duplicate from a counted hit.** Both return 202.
 - **Dropped on a bad message.** A malformed message is terminated, not dead-lettered.

@@ -451,3 +451,48 @@ func TestV2RoutesAbsentWithoutQueue(t *testing.T) {
 	e := newEnv(t)
 	wantStatus(t, e.hitV2("vid1", "alice"), 404)
 }
+
+func TestV2ViewsValidation(t *testing.T) {
+	e, _ := newV2Env(t)
+	for name, target := range map[string]string{
+		"missing key":  "/v2/views",
+		"bad key":      "/v2/views?key=a%20b",
+		"half a range": "/v2/views?key=vid1&from=2026-01-01",
+		"bad dates":    "/v2/views?key=vid1&from=x&to=y",
+	} {
+		t.Run(name, func(t *testing.T) {
+			wantStatus(t, e.do("GET", target, ""), 400)
+		})
+	}
+}
+
+func TestV2ViewsSeriesReadsDailyViews(t *testing.T) {
+	e, _ := newV2Env(t)
+	wantStatus(t, e.hitV2("vid1", "alice"), 202)
+	waitViews(t, e, "/v2/views?key=vid1", 1)
+
+	today := time.Now().UTC().Format(time.DateOnly)
+	rec := e.do("GET", "/v2/views?key=vid1&from="+today+"&to="+today, "")
+	wantStatus(t, rec, 200)
+	var out struct{ Days []store.DayViews }
+	decode(t, rec, &out)
+	if len(out.Days) != 1 || out.Days[0].Views != 1 {
+		t.Fatalf("days = %+v", out.Days)
+	}
+}
+
+func TestV2TopLimitValidation(t *testing.T) {
+	e, _ := newV2Env(t)
+	for _, n := range []string{"0", "101", "x"} {
+		wantStatus(t, e.do("GET", "/v2/top?n="+n, ""), 400)
+	}
+}
+
+// /v1 hits land in page_views only, so /v2 totals do not see them.
+func TestV2TotalsIgnoreV1Hits(t *testing.T) {
+	e, _ := newV2Env(t)
+	wantStatus(t, e.hit("vid1", "alice"), 204)
+	wantStatus(t, e.do("GET", "/v2/views?key=vid1", ""), 200)
+	waitViews(t, e, "/v1/views?key=vid1", 1)
+	waitViews(t, e, "/v2/views?key=vid1", 0)
+}

@@ -44,7 +44,7 @@ flowchart TD
 
 | | Write: `POST /v1/hit` | Read: `GET /v1/views`, `GET /v1/top` |
 |---|---|---|
-| Work per request | 1 transaction: dedupe upsert into `seen`, then upsert into `page_views` and `page_totals` (`views = views + 1`) | 1 query straight to Postgres (`page_totals` lookup, daily rows, or ordered `page_totals` for top-N) |
+| Work per request | 1 transaction: dedupe upsert into `seen`, then upsert into `page_views` (`views = views + 1`) | 1 query straight to Postgres (`SUM` by key, daily rows, or `GROUP BY` for top-N) |
 | Dedupe | Fingerprint counts once per key per 7 days (HMAC-SHA256, truncated to 16 bytes) | n/a |
 | Timeout | 5s | 2s |
 | Failure | 503 on Postgres error, nothing lost | 503 / timeout |
@@ -68,15 +68,10 @@ erDiagram
         bytea fp_hash PK "truncated HMAC of fingerprint"
         timestamptz seen_at "indexed, hourly cleanup"
     }
-    page_totals {
-        text key PK "page key"
-        bigint views "all-time count, indexed (views DESC, key)"
-    }
     seen }o..o{ page_views : "same key, no foreign key"
-    page_views }o..o{ page_totals : "same key, kept in step by the writers"
 ```
 
-`seen` and `page_views` are created by `migrations/001_init.sql`, `page_totals` by `migrations/002_page_totals.sql` (which also backfills it from `page_views`). The relationships are logical only: `seen` decides whether a hit counts, `page_views` holds the daily counts and `page_totals` the all-time count per key, both updated in the same transaction.
+Both tables are created by `migrations/001_init.sql`. The relationship is logical only: `seen` decides whether a hit counts, `page_views` holds the counts.
 
 ## Design decisions
 
@@ -93,7 +88,7 @@ erDiagram
   ```
 
   A returned row means count it. No row means a duplicate inside the window, which does not extend the window.
-- **Counting.** In the same transaction, after upserting `page_totals` the same way (`views = page_totals.views + 1`): `INSERT INTO page_views (key, day, views) VALUES ($1, current_date, 1) ON CONFLICT (key, day) DO UPDATE SET views = page_views.views + 1`. Dedupe and count commit together, so a failed hit leaves no trace and the caller's retry counts.
+- **Counting.** In the same transaction: `INSERT INTO page_views (key, day, views) VALUES ($1, current_date, 1) ON CONFLICT (key, day) DO UPDATE SET views = page_views.views + 1`. Dedupe and count commit together, so a failed hit leaves no trace and the caller's retry counts.
 - **Storage:** `page_views(key text, day date, views bigint, PRIMARY KEY (key, day))`, daily buckets, total views only.
 - **Cleanup:** a goroutine deletes `seen` rows older than 7 days once an hour. It is the only background job.
 - **Failure handling:** if Postgres is down the handler returns 503. Nothing is accepted that could be lost.
@@ -106,7 +101,7 @@ erDiagram
 
 - **No cache.** At 1 read/sec every request can hit Postgres. Counts are exact as of the last committed hit.
 - **Statement timeout of ~2s** on read queries, so a slow query can't pile up connections.
-- **`/v1/top`** reads `page_totals` through the `(views DESC, key)` index, so it no longer scans `page_views`. Cap `n` (for example 100).
+- **`/v1/top`** is a plain `GROUP BY` over `page_views`. Cap `n` (for example 100). If the table grows large, restrict it to recent days.
 - **Keys** are validated the same way as on the write path.
 
 ### Outgrowing this

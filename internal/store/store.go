@@ -66,12 +66,6 @@ func (s *Store) Hit(ctx context.Context, key string, fpHash []byte) (bool, error
 	if err != nil {
 		return false, err
 	}
-	_, err = tx.Exec(ctx, `
-		INSERT INTO page_totals (key, views) VALUES ($1, 1)
-		ON CONFLICT (key) DO UPDATE SET views = page_totals.views + 1`, key)
-	if err != nil {
-		return false, err
-	}
 	return true, tx.Commit(ctx)
 }
 
@@ -204,6 +198,15 @@ func (s *Store) HitBatch(ctx context.Context, hits []Hit) error {
 func (s *Store) Total(ctx context.Context, key string) (int64, error) {
 	var n int64
 	err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(views), 0) FROM page_views WHERE key = $1`, key).Scan(&n)
+	return n, err
+}
+
+// TotalFromTotals is the /v2 read: a single-row lookup in page_totals, which
+// only HitBatch maintains. Hits counted through Hit (/v1) are not in it.
+func (s *Store) TotalFromTotals(ctx context.Context, key string) (int64, error) {
+	var n int64
+	err := s.pool.QueryRow(ctx,
 		`SELECT views FROM page_totals WHERE key = $1`, key).Scan(&n)
 	if err == pgx.ErrNoRows {
 		return 0, nil
@@ -234,6 +237,27 @@ func (s *Store) Daily(ctx context.Context, key string, from, to time.Time) ([]Da
 }
 
 func (s *Store) Top(ctx context.Context, n int) ([]KeyViews, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT key, SUM(views)::bigint AS views FROM page_views
+		GROUP BY key ORDER BY views DESC, key LIMIT $1`, n)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []KeyViews{}
+	for rows.Next() {
+		var k KeyViews
+		if err := rows.Scan(&k.Key, &k.Views); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
+// TopFromTotals is the /v2 read: the top keys straight off the page_totals
+// index. See TotalFromTotals.
+func (s *Store) TopFromTotals(ctx context.Context, n int) ([]KeyViews, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT key, views FROM page_totals
 		ORDER BY views DESC, key LIMIT $1`, n)

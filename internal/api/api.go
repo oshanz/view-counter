@@ -48,8 +48,8 @@ func New(s *store.Store, secret []byte, q Queue) http.Handler {
 	mux.HandleFunc("GET /v1/top", a.top)
 	if q != nil {
 		mux.HandleFunc("POST /v2/hit", a.hitAsync)
-		mux.HandleFunc("GET /v2/views", a.views)
-		mux.HandleFunc("GET /v2/top", a.top)
+		mux.HandleFunc("GET /v2/views", a.viewsV2)
+		mux.HandleFunc("GET /v2/top", a.topV2)
 		mux.HandleFunc("GET /v2/ingest", a.ingestLag)
 	}
 	return mux

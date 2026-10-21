@@ -218,65 +218,12 @@ func TestTotalSumsAcrossDays(t *testing.T) {
 		INSERT INTO page_views (key, day, views) VALUES
 			('vid1', current_date, 3),
 			('vid1', current_date - 1, 4),
-			('vid2', current_date, 100);
-		INSERT INTO page_totals (key, views) VALUES ('vid1', 7), ('vid2', 100)`)
+			('vid2', current_date, 100)`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := mustTotal(t, s, "vid1"); got != 7 {
 		t.Fatalf("total = %d, want 7", got)
-	}
-}
-
-// assertTotalsMatchDays fails if page_totals disagrees with the sum of
-// page_views for any key, in either direction.
-func assertTotalsMatchDays(t *testing.T, db *testdb.DB) {
-	t.Helper()
-	var bad int
-	err := db.Pool.QueryRow(ctx, `
-		SELECT count(*) FROM (
-			SELECT key, SUM(views) AS v FROM page_views GROUP BY key
-		) d FULL JOIN page_totals t USING (key)
-		WHERE d.v IS DISTINCT FROM t.views`).Scan(&bad)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bad != 0 {
-		t.Fatalf("%d keys where page_totals differs from the sum of page_views", bad)
-	}
-}
-
-func TestTotalsStayInStepWithDailyViews(t *testing.T) {
-	t.Parallel()
-	s, db := newStore(t)
-
-	// Single hits, including a duplicate that must not count.
-	for _, v := range []string{"a", "b", "a"} {
-		mustHit(t, s, "vid1", v)
-	}
-	mustHit(t, s, "vid2", "a")
-
-	// A batch spanning two days and two keys, with a repeat of a viewer
-	// already counted by Hit.
-	now := time.Now().UTC()
-	yesterday := now.AddDate(0, 0, -1)
-	err := s.HitBatch(ctx, []Hit{
-		{"vid1", [16]byte{1}, now}, {"vid1", [16]byte{2}, now},
-		{"vid1", [16]byte{3}, yesterday}, {"vid3", [16]byte{1}, yesterday},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.HitBatch(ctx, []Hit{{"vid1", [16]byte{1}, now}}); err != nil {
-		t.Fatal(err)
-	}
-
-	assertTotalsMatchDays(t, db)
-	if got := mustTotal(t, s, "vid1"); got != 5 {
-		t.Fatalf("vid1 total = %d, want 5", got)
-	}
-	if got := mustTotal(t, s, "vid3"); got != 1 {
-		t.Fatalf("vid3 total = %d, want 1", got)
 	}
 }
 
@@ -328,8 +275,7 @@ func TestTopOrdersByViewsThenKeyAndHonoursLimit(t *testing.T) {
 			('b', current_date, 5), ('b', current_date - 1, 5),
 			('a', current_date, 10),
 			('c', current_date, 3),
-			('d', current_date, 50);
-		INSERT INTO page_totals (key, views) VALUES ('a', 10), ('b', 10), ('c', 3), ('d', 50)`)
+			('d', current_date, 50)`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,5 +442,106 @@ func TestConcurrentBatchesCountEachViewerOnce(t *testing.T) {
 	wg.Wait()
 	if got := mustTotal(t, s, "hot"); got != 50 {
 		t.Fatalf("total = %d, want 50", got)
+	}
+}
+
+func mustTotalFromTotals(t *testing.T, s *Store, key string) int64 {
+	t.Helper()
+	n, err := s.TotalFromTotals(ctx, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestTotalFromTotalsOfUnknownKeyIsZero(t *testing.T) {
+	t.Parallel()
+	s, _ := newStore(t)
+	if got := mustTotalFromTotals(t, s, "nope"); got != 0 {
+		t.Fatalf("total = %d, want 0", got)
+	}
+}
+
+func TestTopFromTotalsOrdersByViewsThenKeyAndHonoursLimit(t *testing.T) {
+	t.Parallel()
+	s, db := newStore(t)
+	_, err := db.Pool.Exec(ctx, `
+		INSERT INTO page_totals (key, views) VALUES ('b', 10), ('a', 10), ('c', 3), ('d', 50)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.TopFromTotals(ctx, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []KeyViews{{"d", 50}, {"a", 10}, {"b", 10}}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("top = %v, want %v", got, want)
+	}
+}
+
+func TestTopFromTotalsOnEmptyTableIsEmptyNotNil(t *testing.T) {
+	t.Parallel()
+	s, _ := newStore(t)
+	got, err := s.TopFromTotals(ctx, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || len(got) != 0 {
+		t.Fatalf("top = %#v, want empty non-nil slice", got)
+	}
+}
+
+// HitBatch keeps page_totals equal to the sum of page_views, across days,
+// keys, duplicates and a replayed batch.
+func TestHitBatchKeepsTotalsInStepWithDailyViews(t *testing.T) {
+	t.Parallel()
+	s, db := newStore(t)
+
+	now := time.Now().UTC()
+	yesterday := now.AddDate(0, 0, -1)
+	batch := []Hit{
+		{"vid1", [16]byte{1}, now}, {"vid1", [16]byte{2}, now},
+		{"vid1", [16]byte{3}, yesterday}, {"vid1", [16]byte{3}, now}, // repeat counts once
+		{"vid3", [16]byte{1}, yesterday},
+	}
+	for i := 0; i < 2; i++ { // second pass is a replay and must count nothing
+		if err := s.HitBatch(ctx, batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var bad int
+	err := db.Pool.QueryRow(ctx, `
+		SELECT count(*) FROM (
+			SELECT key, SUM(views) AS v FROM page_views GROUP BY key
+		) d FULL JOIN page_totals t USING (key)
+		WHERE d.v IS DISTINCT FROM t.views`).Scan(&bad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bad != 0 {
+		t.Fatalf("%d keys where page_totals differs from the sum of page_views", bad)
+	}
+	if got := mustTotalFromTotals(t, s, "vid1"); got != 3 {
+		t.Fatalf("vid1 total = %d, want 3", got)
+	}
+	if got := mustTotalFromTotals(t, s, "vid3"); got != 1 {
+		t.Fatalf("vid3 total = %d, want 1", got)
+	}
+}
+
+// /v1 (Hit) reads and writes page_views only, so page_totals stays untouched.
+func TestHitDoesNotTouchPageTotals(t *testing.T) {
+	t.Parallel()
+	s, db := newStore(t)
+	mustHit(t, s, "vid1", "alice")
+	var n int
+	db.Pool.QueryRow(ctx, `SELECT count(*) FROM page_totals`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("page_totals has %d rows after a /v1 hit, want 0", n)
+	}
+	if got := mustTotal(t, s, "vid1"); got != 1 {
+		t.Fatalf("v1 total = %d, want 1", got)
 	}
 }
