@@ -50,7 +50,56 @@ flowchart TD
 | `GET /v2/top` | Same handler as `/v1/top`. |
 | `GET /v2/ingest` | `{"pending": N, "ack_pending": M}`: hits published but not yet delivered to the writer, and hits delivered but not yet committed. |
 
+```mermaid
+flowchart LR
+    C[Client]
+
+    subgraph API["Go service"]
+        V["GET /v2/views<br/>(handler shared with /v1)"]
+        T["GET /v2/top<br/>(handler shared with /v1)"]
+        I["GET /v2/ingest"]
+    end
+
+    PG[("Postgres<br/>page_views(key, day, views)")]
+    JS[["JetStream HITS<br/>consumer info"]]
+
+    C --> V
+    C --> T
+    C --> I
+
+    V -->|"total, or daily series<br/>with from/to<br/>~2s statement timeout"| PG
+    T -->|"top keys<br/>~2s statement timeout"| PG
+    I -->|"pending, ack_pending"| JS
+
+    PG -->|rows| V
+    PG -->|rows| T
+    JS -->|lag| I
+
+    V -->|"200 JSON, or 503 on error"| C
+    T -->|"200 JSON, or 503 on error"| C
+    I -->|"200 JSON"| C
+```
+
 Counts lag by the stream backlog plus up to 250ms of fetch wait plus the transaction time. Under normal load that is well under a second. During an outage or a slow Postgres it grows with the backlog; watch `/v2/ingest`.
+
+### Database tables
+
+`/v2` uses the same two tables as `/v1`; the writer touches both in one transaction per batch.
+
+```mermaid
+erDiagram
+    page_views {
+        text key PK "page key, [A-Za-z0-9_-]{1,64}"
+        date day PK "UTC day"
+        bigint views "daily count"
+    }
+    seen {
+        text key PK "page key"
+        bytea fp_hash PK "truncated HMAC of fingerprint"
+        timestamptz seen_at "indexed, hourly cleanup"
+    }
+    seen }o..o{ page_views : "same key, no foreign key"
+```
 
 ## Design decisions
 

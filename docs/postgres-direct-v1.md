@@ -54,6 +54,25 @@ flowchart TD
 - DB access is `pgxpool` with default settings (max conns = max(4, NumCPU) = 12 on the test machine). Postgres runs with default config from the stock `postgres:17` image.
 - Sized for ~1 write/s and ~1 read/s. Anything beyond that is headroom.
 
+### Database tables
+
+```mermaid
+erDiagram
+    page_views {
+        text key PK "page key, [A-Za-z0-9_-]{1,64}"
+        date day PK "UTC day"
+        bigint views "daily count"
+    }
+    seen {
+        text key PK "page key"
+        bytea fp_hash PK "truncated HMAC of fingerprint"
+        timestamptz seen_at "indexed, hourly cleanup"
+    }
+    seen }o..o{ page_views : "same key, no foreign key"
+```
+
+Both tables are created by `migrations/001_init.sql`. The relationship is logical only: `seen` decides whether a hit counts, `page_views` holds the counts.
+
 ## Design decisions
 
 ### Write path
