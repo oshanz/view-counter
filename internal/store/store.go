@@ -66,6 +66,12 @@ func (s *Store) Hit(ctx context.Context, key string, fpHash []byte) (bool, error
 	if err != nil {
 		return false, err
 	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO page_totals (key, views) VALUES ($1, 1)
+		ON CONFLICT (key) DO UPDATE SET views = page_totals.views + 1`, key)
+	if err != nil {
+		return false, err
+	}
 	return true, tx.Commit(ctx)
 }
 
@@ -173,13 +179,35 @@ func (s *Store) HitBatch(ctx context.Context, hits []Hit) error {
 		ck, cd, cn); err != nil {
 		return err
 	}
+
+	// cs is sorted by key, so the per-key sums are already in lock order.
+	tk := make([]string, 0, len(cs))
+	tn := make([]int64, 0, len(cs))
+	for i := range cs {
+		if len(tk) > 0 && tk[len(tk)-1] == ck[i] {
+			tn[len(tn)-1] += cn[i]
+			continue
+		}
+		tk = append(tk, ck[i])
+		tn = append(tn, cn[i])
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO page_totals (key, views)
+		SELECT k, n FROM unnest($1::text[], $2::bigint[]) AS t(k, n)
+		ON CONFLICT (key) DO UPDATE SET views = page_totals.views + EXCLUDED.views`,
+		tk, tn); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
 func (s *Store) Total(ctx context.Context, key string) (int64, error) {
 	var n int64
 	err := s.pool.QueryRow(ctx,
-		`SELECT COALESCE(SUM(views), 0) FROM page_views WHERE key = $1`, key).Scan(&n)
+		`SELECT views FROM page_totals WHERE key = $1`, key).Scan(&n)
+	if err == pgx.ErrNoRows {
+		return 0, nil
+	}
 	return n, err
 }
 
@@ -207,8 +235,8 @@ func (s *Store) Daily(ctx context.Context, key string, from, to time.Time) ([]Da
 
 func (s *Store) Top(ctx context.Context, n int) ([]KeyViews, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT key, SUM(views)::bigint AS views FROM page_views
-		GROUP BY key ORDER BY views DESC, key LIMIT $1`, n)
+		SELECT key, views FROM page_totals
+		ORDER BY views DESC, key LIMIT $1`, n)
 	if err != nil {
 		return nil, err
 	}

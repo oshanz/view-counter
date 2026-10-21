@@ -35,7 +35,7 @@ flowchart TD
     subgraph B [store.HitBatch, one transaction]
         D1[Drop repeats inside the batch] --> D2[Multi-row upsert into seen<br/>RETURNING the hits that are new]
         D2 --> D3[Aggregate by key and day]
-        D3 --> D4[Multi-row upsert into page_views<br/>views = views + EXCLUDED.views]
+        D3 --> D4[Multi-row upsert into page_views and page_totals<br/>views = views + EXCLUDED.views]
     end
     B -- committed --> ACK[Ack every message]
     B -. error .-> NAK[Nak with 2s delay, retried]
@@ -84,7 +84,7 @@ Counts lag by the stream backlog plus up to 250ms of fetch wait plus the transac
 
 ### Database tables
 
-`/v2` uses the same two tables as `/v1`; the writer touches both in one transaction per batch.
+`/v2` uses the same three tables as `/v1`; the writer touches all of them in one transaction per batch.
 
 ```mermaid
 erDiagram
@@ -98,7 +98,12 @@ erDiagram
         bytea fp_hash PK "truncated HMAC of fingerprint"
         timestamptz seen_at "indexed, hourly cleanup"
     }
+    page_totals {
+        text key PK "page key"
+        bigint views "all-time count, indexed (views DESC, key)"
+    }
     seen }o..o{ page_views : "same key, no foreign key"
+    page_views }o..o{ page_totals : "same key, kept in step by the writers"
 ```
 
 ## Design decisions
@@ -188,6 +193,6 @@ Finding the ceiling: `STEPS=20000,30000,50000 STOP_ON_FAIL=1 MAX_VUS=10000 mise 
 - **Single NATS node, one replica.** For durability across node loss run a 3 node cluster and set `Replicas: 3` on the stream. Acked writes are replicated to a quorum but not necessarily fsynced at once; check JetStream's `sync_interval` for your version if a simultaneous power loss is a concern.
 - **One stream is one Raft group** on a cluster, so one leader takes all publishes. If that saturates, split into several streams by hash of the key.
 - **Single writer loop per instance.** One goroutine fetches and writes batches. If Postgres, not the loop, is the limit, add instances. If the loop is the limit, run more consumers on the same durable consumer.
-- **Reads are unchanged.** `/v2` does nothing for read capacity. `GET /v2/views` held 10k reads/s in the load test above, but on a small data set with a hot key and no concurrent writes, and `/v2/top` was not tested. See the read-path options in the scaling discussion: an in-process cache with `singleflight`, a precomputed top-N, and a `page_totals` table. None of these are implemented.
+- **Reads are unchanged.** `/v2` does nothing for read capacity. `GET /v2/views` held 10k reads/s in the load test above, but on a small data set with a hot key and no concurrent writes, and `/v2/top` was not tested. `page_totals` (all-time sum per key, updated in the write transaction) now serves `Total` and `Top`, but it did not move the ceiling: with the small test data, `Total` was already a one-row read. The other option, an in-process cache with `singleflight`, is not implemented.
 - **Callers cannot tell a duplicate from a counted hit.** Both return 202.
 - **Dropped on a bad message.** A malformed message is terminated, not dead-lettered.
