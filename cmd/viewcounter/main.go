@@ -14,6 +14,8 @@ import (
 	"github.com/oz/view-counter/internal/api"
 	"github.com/oz/view-counter/internal/ingest"
 	"github.com/oz/view-counter/internal/store"
+	"github.com/oz/view-counter/internal/telemetry"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 func main() {
@@ -27,7 +29,22 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	st, err := store.New(ctx, dbURL)
+	// Traces and metrics go to an OTLP collector (SigNoz) only when
+	// OTEL_EXPORTER_OTLP_ENDPOINT is set.
+	traced := telemetry.Enabled()
+	if traced {
+		shutdown, err := telemetry.Setup(ctx, "viewcounter")
+		if err != nil {
+			log.Fatalf("telemetry: %v", err)
+		}
+		defer func() {
+			flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			shutdown(flushCtx)
+		}()
+	}
+
+	st, err := store.New(ctx, dbURL, traced)
 	if err != nil {
 		log.Fatalf("connect to postgres: %v", err)
 	}
@@ -50,9 +67,13 @@ func main() {
 		go func() { defer wg.Done(); q.Run(ctx, st) }()
 	}
 
+	var handler http.Handler = api.New(st, []byte(secret), queue)
+	if traced {
+		handler = otelhttp.NewHandler(handler, "viewcounter")
+	}
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           api.New(st, []byte(secret), queue),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	shutdownDone := make(chan struct{})

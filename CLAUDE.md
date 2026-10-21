@@ -8,7 +8,7 @@ Implemented. Tool versions are pinned in `mise.toml` (Go 1.25.0); Postgres runs 
 
 - `mise run db` starts Postgres, `mise run run` starts the service on `:8080`, `mise run test` runs tests (none written yet).
 - k6 (pinned in `mise.toml`) non-functional tests live in `loadtest/`: `mise run stress` (ramp to 200 writes/s and 50 reads/s, mostly on one hot key). It starts the service itself.
-- Env: `HMAC_SECRET` (required, dev default in `mise.toml`), `DATABASE_URL`, `ADDR`, `NATS_URL` (optional, enables `/v2`).
+- Env: `HMAC_SECRET` (required, dev default in `mise.toml`), `DATABASE_URL`, `ADDR`, `NATS_URL` (optional, enables `/v2`), `OTEL_EXPORTER_OTLP_ENDPOINT` (optional, sends traces and metrics to an OTLP collector such as SigNoz; see `internal/telemetry`). `mise.toml` sets it to the local SigNoz (`http://localhost:4317`) and moves `ADDR` to `:8081`, since SigNoz binds host port 8080; unset it to run without telemetry. For load tests also set `OTEL_TRACES_SAMPLER=traceidratio OTEL_TRACES_SAMPLER_ARG=0.01`.
 - To reset the schema: `docker compose down -v`.
 
 The design lives in `docs/postgres-only-benchmark.md` (Mermaid diagrams, decisions, stress test results). The optional JetStream `/v2` write path is documented in `docs/jetstream-v2.md`.

@@ -4,6 +4,10 @@ k6 = "2.3.0"
 
 [env]
 HMAC_SECRET = "dev-secret-change-me"
+# Local SigNoz owns host port 8080, so the service moves to 8081.
+ADDR = ":8081"
+OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4317"
+OTEL_EXPORTER_OTLP_INSECURE = "true"
 
 [tasks.db]
 description = "Start Postgres"
@@ -28,3 +32,9 @@ description = "k6 stepped read load on GET /v2/views, 500 to 10k reads/s"
 depends = ["db"]
 env = { NATS_URL = "nats://127.0.0.1:4222" }
 run = "loadtest/run.sh loadtest/views.js"
+
+[tasks.stress-all]
+description = "k6 mixed load on every /v1 and /v2 endpoint at once"
+depends = ["db"]
+env = { NATS_URL = "nats://127.0.0.1:4222" }
+run = "loadtest/run.sh loadtest/all.js"

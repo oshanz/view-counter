@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -24,10 +25,26 @@ type KeyViews struct {
 	Views int64  `json:"views"`
 }
 
-func New(ctx context.Context, url string) (*Store, error) {
-	pool, err := pgxpool.New(ctx, url)
+// New connects to Postgres. With traced set, queries emit OpenTelemetry spans
+// and the pool reports its stats as metrics.
+func New(ctx context.Context, url string, traced ...bool) (*Store, error) {
+	cfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, err
+	}
+	trace := len(traced) > 0 && traced[0]
+	if trace {
+		cfg.ConnConfig.Tracer = otelpgx.NewTracer()
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if trace {
+		if err := otelpgx.RecordStats(pool); err != nil {
+			pool.Close()
+			return nil, err
+		}
 	}
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
