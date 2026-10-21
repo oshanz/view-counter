@@ -66,6 +66,9 @@ func main() {
 		}
 		defer q.Close()
 		queue = q
+		if err := q.ObserveLag(); err != nil {
+			log.Fatalf("register ingest metrics: %v", err)
+		}
 		// Several fetch loops share the one durable consumer; JetStream
 		// splits the messages between them.
 		for range ingestWorkers {

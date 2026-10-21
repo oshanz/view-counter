@@ -1,0 +1,1616 @@
+{
+  "schemaVersion": "v6",
+  "generateName": true,
+  "tags": [
+    {
+      "key": "tag",
+      "value": "view-counter"
+    },
+    {
+      "key": "tag",
+      "value": "loadtest"
+    }
+  ],
+  "spec": {
+    "display": {
+      "name": "View counter: write load test",
+      "description": "HTTP rate and latency, ingest backlog, writer and Postgres throughput, CPU and Go runtime during a load test."
+    },
+    "variables": [],
+    "panels": {
+      "0c5c961e-0fb1-4605-83b4-d994763be0e3": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Requests per second",
+            "description": "Server requests per second by route (all requests, not sampled)."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "fillSpans": false
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "2"
+              },
+              "chartAppearance": {
+                "lineInterpolation": "spline",
+                "showPoints": false,
+                "lineStyle": "solid",
+                "fillMode": "none",
+                "spanGaps": {
+                  "fillOnlyBelow": false,
+                  "fillLessThan": ""
+                }
+              },
+              "axes": {
+                "softMin": null,
+                "softMax": null,
+                "isLogScale": false
+              },
+              "legend": {
+                "position": "bottom",
+                "mode": "list",
+                "customColors": null
+              },
+              "thresholds": null
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "stepInterval": 60,
+                    "signal": "metrics",
+                    "source": "",
+                    "aggregations": [
+                      {
+                        "metricName": "http.server.request.duration.count",
+                        "temporality": "",
+                        "timeAggregation": "rate",
+                        "spaceAggregation": "sum",
+                        "reduceTo": "avg"
+                      }
+                    ],
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [
+                      {
+                        "name": "http.route",
+                        "signal": "",
+                        "fieldContext": "attribute",
+                        "fieldDataType": "string"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "legend": "{{http.route}}"
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "0dbe8dc3-063a-4576-ad8e-7459342dd83c": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Request latency (/v2/hit)",
+            "description": "p50, p95 and p99 server-side duration of POST /v2/hit."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "fillSpans": false
+              },
+              "formatting": {
+                "unit": "s",
+                "decimalPrecision": "2"
+              },
+              "chartAppearance": {
+                "lineInterpolation": "spline",
+                "showPoints": false,
+                "lineStyle": "solid",
+                "fillMode": "none",
+                "spanGaps": {
+                  "fillOnlyBelow": false,
+                  "fillLessThan": ""
+                }
+              },
+              "axes": {
+                "softMin": null,
+                "softMax": null,
+                "isLogScale": false
+              },
+              "legend": {
+                "position": "bottom",
+                "mode": "list",
+                "customColors": null
+              },
+              "thresholds": null
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/CompositeQuery",
+                  "spec": {
+                    "queries": [
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "A",
+                          "stepInterval": 60,
+                          "signal": "metrics",
+                          "source": "",
+                          "aggregations": [
+                            {
+                              "metricName": "http.server.request.duration.bucket",
+                              "temporality": "",
+                              "timeAggregation": "rate",
+                              "spaceAggregation": "p50",
+                              "reduceTo": "avg"
+                            }
+                          ],
+                          "disabled": false,
+                          "filter": {
+                            "expression": "http.route = '/v2/hit'"
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "legend": "p50"
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "B",
+                          "stepInterval": 60,
+                          "signal": "metrics",
+                          "source": "",
+                          "aggregations": [
+                            {
+                              "metricName": "http.server.request.duration.bucket",
+                              "temporality": "",
+                              "timeAggregation": "rate",
+                              "spaceAggregation": "p95",
+                              "reduceTo": "avg"
+                            }
+                          ],
+                          "disabled": false,
+                          "filter": {
+                            "expression": "http.route = '/v2/hit'"
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "legend": "p95"
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "C",
+                          "stepInterval": 60,
+                          "signal": "metrics",
+                          "source": "",
+                          "aggregations": [
+                            {
+                              "metricName": "http.server.request.duration.bucket",
+                              "temporality": "",
+                              "timeAggregation": "rate",
+                              "spaceAggregation": "p99",
+                              "reduceTo": "avg"
+                            }
+                          ],
+                          "disabled": false,
+                          "filter": {
+                            "expression": "http.route = '/v2/hit'"
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "legend": "p99"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "f33ca481-459f-481e-92a0-545706bbd125": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Responses by status",
+            "description": "Requests per second by status code."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "fillSpans": false
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "2"
+              },
+              "chartAppearance": {
+                "lineInterpolation": "spline",
+                "showPoints": false,
+                "lineStyle": "solid",
+                "fillMode": "none",
+                "spanGaps": {
+                  "fillOnlyBelow": false,
+                  "fillLessThan": ""
+                }
+              },
+              "axes": {
+                "softMin": null,
+                "softMax": null,
+                "isLogScale": false
+              },
+              "legend": {
+                "position": "bottom",
+                "mode": "list",
+                "customColors": null
+              },
+              "thresholds": null
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "stepInterval": 60,
+                    "signal": "metrics",
+                    "source": "",
+                    "aggregations": [
+                      {
+                        "metricName": "http.server.request.duration.count",
+                        "temporality": "",
+                        "timeAggregation": "rate",
+                        "spaceAggregation": "sum",
+                        "reduceTo": "avg"
+                      }
+                    ],
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [
+                      {
+                        "name": "http.response.status_code",
+                        "signal": "",
+                        "fieldContext": "attribute",
+                        "fieldDataType": "string"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "legend": "{{http.response.status_code}}"
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "f5573b3b-2b01-41cf-87c7-ae01180c8343": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "p95 latency by route",
+            "description": "p95 server-side duration per route."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "fillSpans": false
+              },
+              "formatting": {
+                "unit": "s",
+                "decimalPrecision": "2"
+              },
+              "chartAppearance": {
+                "lineInterpolation": "spline",
+                "showPoints": false,
+                "lineStyle": "solid",
+                "fillMode": "none",
+                "spanGaps": {
+                  "fillOnlyBelow": false,
+                  "fillLessThan": ""
+                }
+              },
+              "axes": {
+                "softMin": null,
+                "softMax": null,
+                "isLogScale": false
+              },
+              "legend": {
+                "position": "bottom",
+                "mode": "list",
+                "customColors": null
+              },
+              "thresholds": null
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "stepInterval": 60,
+                    "signal": "metrics",
+                    "source": "",
+                    "aggregations": [
+                      {
+                        "metricName": "http.server.request.duration.bucket",
+                        "temporality": "",
+                        "timeAggregation": "rate",
+                        "spaceAggregation": "p95",
+                        "reduceTo": "avg"
+                      }
+                    ],
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [
+                      {
+                        "name": "http.route",
+                        "signal": "",
+                        "fieldContext": "attribute",
+                        "fieldDataType": "string"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "legend": "{{http.route}}"
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "66f08419-e91f-4269-aaf8-126c41c69acd": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Ingest backlog",
+            "description": "pending: published, not yet fetched. ack_pending: fetched, not yet committed."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "fillSpans": false
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "2"
+              },
+              "chartAppearance": {
+                "lineInterpolation": "spline",
+                "showPoints": false,
+                "lineStyle": "solid",
+                "fillMode": "none",
+                "spanGaps": {
+                  "fillOnlyBelow": false,
+                  "fillLessThan": ""
+                }
+              },
+              "axes": {
+                "softMin": null,
+                "softMax": null,
+                "isLogScale": false
+              },
+              "legend": {
+                "position": "bottom",
+                "mode": "list",
+                "customColors": null
+              },
+              "thresholds": null
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/CompositeQuery",
+                  "spec": {
+                    "queries": [
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "A",
+                          "stepInterval": 60,
+                          "signal": "metrics",
+                          "source": "",
+                          "aggregations": [
+                            {
+                              "metricName": "ingest.pending",
+                              "temporality": "",
+                              "timeAggregation": "avg",
+                              "spaceAggregation": "avg",
+                              "reduceTo": "avg"
+                            }
+                          ],
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "legend": "pending"
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "B",
+                          "stepInterval": 60,
+                          "signal": "metrics",
+                          "source": "",
+                          "aggregations": [
+                            {
+                              "metricName": "ingest.ack_pending",
+                              "temporality": "",
+                              "timeAggregation": "avg",
+                              "spaceAggregation": "avg",
+                              "reduceTo": "avg"
+                            }
+                          ],
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "legend": "ack pending"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "425f292c-98ac-4073-87fc-6d080d7eca9c": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Writer throughput",
+            "description": "Rows committed per second by Postgres (inserts on seen and page_views)."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "fillSpans": false
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "2"
+              },
+              "chartAppearance": {
+                "lineInterpolation": "spline",
+                "showPoints": false,
+                "lineStyle": "solid",
+                "fillMode": "none",
+                "spanGaps": {
+                  "fillOnlyBelow": false,
+                  "fillLessThan": ""
+                }
+              },
+              "axes": {
+                "softMin": null,
+                "softMax": null,
+                "isLogScale": false
+              },
+              "legend": {
+                "position": "bottom",
+                "mode": "list",
+                "customColors": null
+              },
+              "thresholds": null
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "stepInterval": 60,
+                    "signal": "metrics",
+                    "source": "",
+                    "aggregations": [
+                      {
+                        "metricName": "postgresql.operations",
+                        "temporality": "",
+                        "timeAggregation": "rate",
+                        "spaceAggregation": "sum",
+                        "reduceTo": "avg"
+                      }
+                    ],
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [
+                      {
+                        "name": "operation",
+                        "signal": "",
+                        "fieldContext": "attribute",
+                        "fieldDataType": "string"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "legend": "{{operation}}"
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "82f88e73-a455-4950-af4b-94a89e3f0744": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Writer transaction latency",
+            "description": "p95 duration of Postgres client spans from the writer (sampled traces)."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "fillSpans": false
+              },
+              "formatting": {
+                "unit": "ns",
+                "decimalPrecision": "2"
+              },
+              "chartAppearance": {
+                "lineInterpolation": "spline",
+                "showPoints": false,
+                "lineStyle": "solid",
+                "fillMode": "none",
+                "spanGaps": {
+                  "fillOnlyBelow": false,
+                  "fillLessThan": ""
+                }
+              },
+              "axes": {
+                "softMin": null,
+                "softMax": null,
+                "isLogScale": false
+              },
+              "legend": {
+                "position": "bottom",
+                "mode": "list",
+                "customColors": null
+              },
+              "thresholds": null
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "stepInterval": 60,
+                    "signal": "traces",
+                    "source": "",
+                    "aggregations": [
+                      {
+                        "expression": "p95(durationNano)"
+                      }
+                    ],
+                    "disabled": false,
+                    "filter": {
+                      "expression": "db.system = 'postgresql'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "name",
+                        "signal": "",
+                        "fieldContext": "attribute",
+                        "fieldDataType": "string"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "legend": "{{name}}"
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "bae8c68b-fab9-41ca-832f-b796b5a7459b": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Pool contention",
+            "description": "Acquires that had to wait for a free connection (per sec)."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "fillSpans": false
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "2"
+              },
+              "chartAppearance": {
+                "lineInterpolation": "spline",
+                "showPoints": false,
+                "lineStyle": "solid",
+                "fillMode": "none",
+                "spanGaps": {
+                  "fillOnlyBelow": false,
+                  "fillLessThan": ""
+                }
+              },
+              "axes": {
+                "softMin": null,
+                "softMax": null,
+                "isLogScale": false
+              },
+              "legend": {
+                "position": "bottom",
+                "mode": "list",
+                "customColors": null
+              },
+              "thresholds": null
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/CompositeQuery",
+                  "spec": {
+                    "queries": [
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "A",
+                          "stepInterval": 60,
+                          "signal": "metrics",
+                          "source": "",
+                          "aggregations": [
+                            {
+                              "metricName": "pgxpool.empty_acquire",
+                              "temporality": "",
+                              "timeAggregation": "rate",
+                              "spaceAggregation": "sum",
+                              "reduceTo": "avg"
+                            }
+                          ],
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "legend": "waited"
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "B",
+                          "stepInterval": 60,
+                          "signal": "metrics",
+                          "source": "",
+                          "aggregations": [
+                            {
+                              "metricName": "pgxpool.canceled_acquires",
+                              "temporality": "",
+                              "timeAggregation": "rate",
+                              "spaceAggregation": "sum",
+                              "reduceTo": "avg"
+                            }
+                          ],
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "legend": "cancelled"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "a14f1eba-9407-4f7d-b7bd-b1535bdfcd16": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Container CPU",
+            "description": "CPU utilization per container (NATS and Postgres). k6 and the service are on the host."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "fillSpans": false
+              },
+              "formatting": {
+                "unit": "percent",
+                "decimalPrecision": "2"
+              },
+              "chartAppearance": {
+                "lineInterpolation": "spline",
+                "showPoints": false,
+                "lineStyle": "solid",
+                "fillMode": "none",
+                "spanGaps": {
+                  "fillOnlyBelow": false,
+                  "fillLessThan": ""
+                }
+              },
+              "axes": {
+                "softMin": null,
+                "softMax": null,
+                "isLogScale": false
+              },
+              "legend": {
+                "position": "bottom",
+                "mode": "list",
+                "customColors": null
+              },
+              "thresholds": null
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "stepInterval": 60,
+                    "signal": "metrics",
+                    "source": "",
+                    "aggregations": [
+                      {
+                        "metricName": "container.cpu.utilization",
+                        "temporality": "",
+                        "timeAggregation": "avg",
+                        "spaceAggregation": "avg",
+                        "reduceTo": "avg"
+                      }
+                    ],
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [
+                      {
+                        "name": "container.name",
+                        "signal": "",
+                        "fieldContext": "attribute",
+                        "fieldDataType": "string"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "legend": "{{container.name}}"
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "1ad5426c-7726-4e89-bcaa-30da75286624": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Host CPU",
+            "description": "Host CPU by state. Near 100% busy means k6, service, NATS and Postgres compete."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "fillSpans": false
+              },
+              "formatting": {
+                "unit": "percentunit",
+                "decimalPrecision": "2"
+              },
+              "chartAppearance": {
+                "lineInterpolation": "spline",
+                "showPoints": false,
+                "lineStyle": "solid",
+                "fillMode": "none",
+                "spanGaps": {
+                  "fillOnlyBelow": false,
+                  "fillLessThan": ""
+                }
+              },
+              "axes": {
+                "softMin": null,
+                "softMax": null,
+                "isLogScale": false
+              },
+              "legend": {
+                "position": "bottom",
+                "mode": "list",
+                "customColors": null
+              },
+              "thresholds": null
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "stepInterval": 60,
+                    "signal": "metrics",
+                    "source": "",
+                    "aggregations": [
+                      {
+                        "metricName": "system.cpu.utilization",
+                        "temporality": "",
+                        "timeAggregation": "avg",
+                        "spaceAggregation": "avg",
+                        "reduceTo": "avg"
+                      }
+                    ],
+                    "disabled": false,
+                    "filter": {
+                      "expression": "state != 'idle'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "state",
+                        "signal": "",
+                        "fieldContext": "attribute",
+                        "fieldDataType": "string"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "legend": "{{state}}"
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "4d8979f7-6802-49ce-b39f-e417baf151e5": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Go allocation rate",
+            "description": "Bytes allocated per second by the service. High values mean GC pressure."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "fillSpans": false
+              },
+              "formatting": {
+                "unit": "bytes",
+                "decimalPrecision": "2"
+              },
+              "chartAppearance": {
+                "lineInterpolation": "spline",
+                "showPoints": false,
+                "lineStyle": "solid",
+                "fillMode": "none",
+                "spanGaps": {
+                  "fillOnlyBelow": false,
+                  "fillLessThan": ""
+                }
+              },
+              "axes": {
+                "softMin": null,
+                "softMax": null,
+                "isLogScale": false
+              },
+              "legend": {
+                "position": "bottom",
+                "mode": "list",
+                "customColors": null
+              },
+              "thresholds": null
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "name": "A",
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "stepInterval": 60,
+                    "signal": "metrics",
+                    "source": "",
+                    "aggregations": [
+                      {
+                        "metricName": "go.memory.allocated",
+                        "temporality": "",
+                        "timeAggregation": "rate",
+                        "spaceAggregation": "sum",
+                        "reduceTo": "avg"
+                      }
+                    ],
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "legend": "allocated"
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "cd4ea8a0-94aa-4f2b-b351-fb00c1f9f453": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Go heap, GC goal and goroutines",
+            "description": "Heap in use, next GC target and goroutine count."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "fillSpans": false
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "2"
+              },
+              "chartAppearance": {
+                "lineInterpolation": "spline",
+                "showPoints": false,
+                "lineStyle": "solid",
+                "fillMode": "none",
+                "spanGaps": {
+                  "fillOnlyBelow": false,
+                  "fillLessThan": ""
+                }
+              },
+              "axes": {
+                "softMin": null,
+                "softMax": null,
+                "isLogScale": false
+              },
+              "legend": {
+                "position": "bottom",
+                "mode": "list",
+                "customColors": null
+              },
+              "thresholds": null
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/CompositeQuery",
+                  "spec": {
+                    "queries": [
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "A",
+                          "stepInterval": 60,
+                          "signal": "metrics",
+                          "source": "",
+                          "aggregations": [
+                            {
+                              "metricName": "go.memory.used",
+                              "temporality": "",
+                              "timeAggregation": "avg",
+                              "spaceAggregation": "avg",
+                              "reduceTo": "avg"
+                            }
+                          ],
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "legend": "heap used"
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "B",
+                          "stepInterval": 60,
+                          "signal": "metrics",
+                          "source": "",
+                          "aggregations": [
+                            {
+                              "metricName": "go.memory.gc.goal",
+                              "temporality": "",
+                              "timeAggregation": "avg",
+                              "spaceAggregation": "avg",
+                              "reduceTo": "avg"
+                            }
+                          ],
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "legend": "gc goal"
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "C",
+                          "stepInterval": 60,
+                          "signal": "metrics",
+                          "source": "",
+                          "aggregations": [
+                            {
+                              "metricName": "go.goroutine.count",
+                              "temporality": "",
+                              "timeAggregation": "avg",
+                              "spaceAggregation": "avg",
+                              "reduceTo": "avg"
+                            }
+                          ],
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "legend": "goroutines"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "a22ccb12-2843-4489-b8fe-5e5fdde29188": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Container network",
+            "description": "Bytes per second in and out of the NATS and Postgres containers."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "fillSpans": false
+              },
+              "formatting": {
+                "unit": "bytes",
+                "decimalPrecision": "2"
+              },
+              "chartAppearance": {
+                "lineInterpolation": "spline",
+                "showPoints": false,
+                "lineStyle": "solid",
+                "fillMode": "none",
+                "spanGaps": {
+                  "fillOnlyBelow": false,
+                  "fillLessThan": ""
+                }
+              },
+              "axes": {
+                "softMin": null,
+                "softMax": null,
+                "isLogScale": false
+              },
+              "legend": {
+                "position": "bottom",
+                "mode": "list",
+                "customColors": null
+              },
+              "thresholds": null
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/CompositeQuery",
+                  "spec": {
+                    "queries": [
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "A",
+                          "stepInterval": 60,
+                          "signal": "metrics",
+                          "source": "",
+                          "aggregations": [
+                            {
+                              "metricName": "container.network.io.usage.rx_bytes",
+                              "temporality": "",
+                              "timeAggregation": "rate",
+                              "spaceAggregation": "sum",
+                              "reduceTo": "avg"
+                            }
+                          ],
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [
+                            {
+                              "name": "container.name",
+                              "signal": "",
+                              "fieldContext": "attribute",
+                              "fieldDataType": "string"
+                            }
+                          ],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "legend": "rx {{container.name}}"
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "B",
+                          "stepInterval": 60,
+                          "signal": "metrics",
+                          "source": "",
+                          "aggregations": [
+                            {
+                              "metricName": "container.network.io.usage.tx_bytes",
+                              "temporality": "",
+                              "timeAggregation": "rate",
+                              "spaceAggregation": "sum",
+                              "reduceTo": "avg"
+                            }
+                          ],
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [
+                            {
+                              "name": "container.name",
+                              "signal": "",
+                              "fieldContext": "attribute",
+                              "fieldDataType": "string"
+                            }
+                          ],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "legend": "tx {{container.name}}"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "4c4501b4-882e-4d50-8f94-b172db647768": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Slowest spans",
+            "description": "Server spans by route: count, p95 and max (sampled traces)."
+          },
+          "plugin": {
+            "kind": "signoz/TablePanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "columnUnits": null,
+                "decimalPrecision": "2"
+              },
+              "thresholds": null
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/CompositeQuery",
+                  "spec": {
+                    "queries": [
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "A",
+                          "stepInterval": 60,
+                          "signal": "traces",
+                          "source": "",
+                          "aggregations": [
+                            {
+                              "expression": "count()"
+                            }
+                          ],
+                          "disabled": false,
+                          "filter": {
+                            "expression": "kind_string = 'Server'"
+                          },
+                          "groupBy": [
+                            {
+                              "name": "name",
+                              "signal": "",
+                              "fieldContext": "attribute",
+                              "fieldDataType": "string"
+                            }
+                          ],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "legend": "Calls"
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "B",
+                          "stepInterval": 60,
+                          "signal": "traces",
+                          "source": "",
+                          "aggregations": [
+                            {
+                              "expression": "p95(durationNano)"
+                            }
+                          ],
+                          "disabled": false,
+                          "filter": {
+                            "expression": "kind_string = 'Server'"
+                          },
+                          "groupBy": [
+                            {
+                              "name": "name",
+                              "signal": "",
+                              "fieldContext": "attribute",
+                              "fieldDataType": "string"
+                            }
+                          ],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "legend": "p95 ns"
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "C",
+                          "stepInterval": 60,
+                          "signal": "traces",
+                          "source": "",
+                          "aggregations": [
+                            {
+                              "expression": "max(durationNano)"
+                            }
+                          ],
+                          "disabled": false,
+                          "filter": {
+                            "expression": "kind_string = 'Server'"
+                          },
+                          "groupBy": [
+                            {
+                              "name": "name",
+                              "signal": "",
+                              "fieldContext": "attribute",
+                              "fieldDataType": "string"
+                            }
+                          ],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "legend": "max ns"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      }
+    },
+    "layouts": [
+      {
+        "kind": "Grid",
+        "spec": {
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 6,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/0c5c961e-0fb1-4605-83b4-d994763be0e3"
+              }
+            },
+            {
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/0dbe8dc3-063a-4576-ad8e-7459342dd83c"
+              }
+            },
+            {
+              "x": 0,
+              "y": 3,
+              "width": 6,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/f33ca481-459f-481e-92a0-545706bbd125"
+              }
+            },
+            {
+              "x": 6,
+              "y": 3,
+              "width": 6,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/f5573b3b-2b01-41cf-87c7-ae01180c8343"
+              }
+            },
+            {
+              "x": 0,
+              "y": 6,
+              "width": 6,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/66f08419-e91f-4269-aaf8-126c41c69acd"
+              }
+            },
+            {
+              "x": 6,
+              "y": 6,
+              "width": 6,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/425f292c-98ac-4073-87fc-6d080d7eca9c"
+              }
+            },
+            {
+              "x": 0,
+              "y": 9,
+              "width": 6,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/82f88e73-a455-4950-af4b-94a89e3f0744"
+              }
+            },
+            {
+              "x": 6,
+              "y": 9,
+              "width": 6,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/bae8c68b-fab9-41ca-832f-b796b5a7459b"
+              }
+            },
+            {
+              "x": 0,
+              "y": 12,
+              "width": 6,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/a14f1eba-9407-4f7d-b7bd-b1535bdfcd16"
+              }
+            },
+            {
+              "x": 6,
+              "y": 12,
+              "width": 6,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/1ad5426c-7726-4e89-bcaa-30da75286624"
+              }
+            },
+            {
+              "x": 0,
+              "y": 15,
+              "width": 6,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/4d8979f7-6802-49ce-b39f-e417baf151e5"
+              }
+            },
+            {
+              "x": 6,
+              "y": 15,
+              "width": 6,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/cd4ea8a0-94aa-4f2b-b351-fb00c1f9f453"
+              }
+            },
+            {
+              "x": 0,
+              "y": 18,
+              "width": 6,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/a22ccb12-2843-4489-b8fe-5e5fdde29188"
+              }
+            },
+            {
+              "x": 6,
+              "y": 18,
+              "width": 6,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/4c4501b4-882e-4d50-8f94-b172db647768"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "duration": "",
+    "refreshInterval": "",
+    "links": []
+  }
+}
