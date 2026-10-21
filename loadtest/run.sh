@@ -8,6 +8,9 @@ script=${1:?usage: run.sh <k6 script>}
 addr=${ADDR:-:8080}
 base=${BASE_URL:-http://localhost${addr}}
 
+# Export metrics every 5s (the SDK default is 60s) so a 20s load step has several points.
+export OTEL_METRIC_EXPORT_INTERVAL=${OTEL_METRIC_EXPORT_INTERVAL:-5000}
+
 bin=$(mktemp)
 log=$(mktemp)
 go build -o "$bin" ./cmd/viewcounter
