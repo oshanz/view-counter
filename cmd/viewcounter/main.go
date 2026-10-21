@@ -18,6 +18,9 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
+// ingestWorkers is how many fetch loops drain the /v2 stream.
+const ingestWorkers = 6
+
 func main() {
 	dbURL := env("DATABASE_URL", "postgres://viewcounter:viewcounter@localhost:5433/viewcounter")
 	addr := env("ADDR", ":8080")
@@ -63,8 +66,12 @@ func main() {
 		}
 		defer q.Close()
 		queue = q
-		wg.Add(1)
-		go func() { defer wg.Done(); q.Run(ctx, st) }()
+		// Several fetch loops share the one durable consumer; JetStream
+		// splits the messages between them.
+		for range ingestWorkers {
+			wg.Add(1)
+			go func() { defer wg.Done(); q.Run(ctx, st) }()
+		}
 	}
 
 	var handler http.Handler = api.New(st, []byte(secret), queue)
