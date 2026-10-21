@@ -29,6 +29,26 @@ services:
       timeout: 3s
       retries: 15
 
+  # Scrapes host, Postgres and container metrics and ships them to the local
+  # SigNoz ingester on the host (port 4317). Needs SigNoz running; otherwise it
+  # just retries.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    command: ["--config=/etc/otelcol/config.yaml"]
+    user: "0"
+    hostname: view-counter-host
+    environment:
+      SIGNOZ_OTLP_ENDPOINT: host.docker.internal:4317
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./otel/collector.yaml:/etc/otelcol/config.yaml:ro
+      - /:/hostfs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata:
   natsdata:

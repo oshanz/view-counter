@@ -1,0 +1,53 @@
+receivers:
+  hostmetrics:
+    collection_interval: 30s
+    root_path: /hostfs
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization: {enabled: true}
+      load: {}
+      memory:
+        metrics:
+          system.memory.utilization: {enabled: true}
+      paging: {}
+      disk: {}
+      filesystem: {}
+      network: {}
+  postgresql:
+    endpoint: postgres:5432
+    transport: tcp
+    username: viewcounter
+    password: viewcounter
+    databases: [viewcounter]
+    collection_interval: 30s
+    tls:
+      insecure: true
+    metrics:
+      postgresql.deadlocks: {enabled: true}
+      postgresql.sequential_scans: {enabled: true}
+      postgresql.temp_files: {enabled: true}
+  docker_stats:
+    endpoint: unix:///var/run/docker.sock
+    api_version: "1.44"
+    collection_interval: 30s
+
+processors:
+  resourcedetection:
+    detectors: [system]
+    system:
+      hostname_sources: [os]
+  batch: {}
+
+exporters:
+  otlp:
+    endpoint: ${env:SIGNOZ_OTLP_ENDPOINT}
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    metrics:
+      receivers: [hostmetrics, postgresql, docker_stats]
+      processors: [resourcedetection, batch]
+      exporters: [otlp]
