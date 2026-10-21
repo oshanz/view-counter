@@ -328,3 +328,119 @@ func TestPruneSeenDeletesOnlyExpiredRows(t *testing.T) {
 		t.Fatalf("prune must not change counts: total = %d, want 2", got)
 	}
 }
+
+func fpArr(s string) [16]byte {
+	var a [16]byte
+	copy(a[:], s)
+	return a
+}
+
+func TestHitBatchDedupesWithinAndAcrossBatches(t *testing.T) {
+	t.Parallel()
+	s, _ := newStore(t)
+	now := time.Now()
+
+	batch := []Hit{
+		{"vid1", fpArr("alice"), now},
+		{"vid1", fpArr("alice"), now}, // repeat inside the batch
+		{"vid1", fpArr("bob"), now},
+		{"vid2", fpArr("alice"), now}, // same viewer, other key
+	}
+	if err := s.HitBatch(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustTotal(t, s, "vid1"); got != 2 {
+		t.Fatalf("vid1 = %d, want 2", got)
+	}
+	if got := mustTotal(t, s, "vid2"); got != 1 {
+		t.Fatalf("vid2 = %d, want 1", got)
+	}
+
+	// Replaying the same batch (a redelivery) must count nothing.
+	if err := s.HitBatch(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustTotal(t, s, "vid1"); got != 2 {
+		t.Fatalf("vid1 after replay = %d, want 2", got)
+	}
+}
+
+func TestHitBatchEmptyIsNoop(t *testing.T) {
+	t.Parallel()
+	s, _ := newStore(t)
+	if err := s.HitBatch(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHitBatchCountsOnTheDayOfTheHit(t *testing.T) {
+	t.Parallel()
+	s, _ := newStore(t)
+	d1 := time.Date(2026, 3, 1, 23, 59, 0, 0, time.UTC)
+	d2 := d1.Add(2 * time.Minute) // 2026-03-02
+
+	err := s.HitBatch(ctx, []Hit{
+		{"vid1", fpArr("a"), d1},
+		{"vid1", fpArr("b"), d2},
+		{"vid1", fpArr("c"), d2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	days, err := s.Daily(ctx, "vid1", d1, d2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []DayViews{{"2026-03-01", 1}, {"2026-03-02", 2}}
+	if fmt.Sprint(days) != fmt.Sprint(want) {
+		t.Fatalf("days = %v, want %v", days, want)
+	}
+}
+
+func TestHitBatchSevenDayWindow(t *testing.T) {
+	t.Parallel()
+	s, _ := newStore(t)
+	t0 := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+
+	for _, c := range []struct {
+		at   time.Time
+		want int64
+	}{
+		{t0, 1},
+		{t0.Add(6 * 24 * time.Hour), 1}, // inside the window: not counted
+		{t0.Add(8 * 24 * time.Hour), 2}, // outside: counted again
+	} {
+		if err := s.HitBatch(ctx, []Hit{{"vid1", fpArr("alice"), c.at}}); err != nil {
+			t.Fatal(err)
+		}
+		if got := mustTotal(t, s, "vid1"); got != c.want {
+			t.Fatalf("at %v total = %d, want %d", c.at, got, c.want)
+		}
+	}
+}
+
+func TestConcurrentBatchesCountEachViewerOnce(t *testing.T) {
+	t.Parallel()
+	s, _ := newStore(t)
+	now := time.Now()
+
+	// Overlapping batches from several writers, all on one hot key.
+	var wg sync.WaitGroup
+	for w := 0; w < 8; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var b []Hit
+			for i := 0; i < 50; i++ {
+				b = append(b, Hit{"hot", fpArr(fmt.Sprint("v", i)), now})
+			}
+			if err := s.HitBatch(ctx, b); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := mustTotal(t, s, "hot"); got != 50 {
+		t.Fatalf("total = %d, want 50", got)
+	}
+}

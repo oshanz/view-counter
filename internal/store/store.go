@@ -3,6 +3,7 @@ package store
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -66,6 +67,113 @@ func (s *Store) Hit(ctx context.Context, key string, fpHash []byte) (bool, error
 		return false, err
 	}
 	return true, tx.Commit(ctx)
+}
+
+// Hit is one view waiting to be counted. At is when it happened, which decides
+// its day and where its dedupe window starts.
+type Hit struct {
+	Key string
+	FP  [16]byte
+	At  time.Time
+}
+
+// HitBatch counts many views in one transaction with the same rules as Hit.
+// It is idempotent: replaying a batch counts nothing the first run counted.
+func (s *Store) HitBatch(ctx context.Context, hits []Hit) error {
+	type id struct {
+		key string
+		fp  [16]byte
+	}
+	// ON CONFLICT cannot touch one row twice in a statement, so keep the first
+	// occurrence of each pair.
+	first := make(map[id]time.Time, len(hits))
+	for _, h := range hits {
+		k := id{h.Key, h.FP}
+		if at, ok := first[k]; !ok || h.At.Before(at) {
+			first[k] = h.At
+		}
+	}
+	if len(first) == 0 {
+		return nil
+	}
+	pairs := make([]id, 0, len(first))
+	for k := range first {
+		pairs = append(pairs, k)
+	}
+	// A stable order keeps concurrent writers from deadlocking on row locks.
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].key != pairs[j].key {
+			return pairs[i].key < pairs[j].key
+		}
+		return string(pairs[i].fp[:]) < string(pairs[j].fp[:])
+	})
+	keys := make([]string, len(pairs))
+	fps := make([][]byte, len(pairs))
+	ats := make([]time.Time, len(pairs))
+	for i, p := range pairs {
+		keys[i], fps[i], ats[i] = p.key, p.fp[:], first[p]
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, `
+		INSERT INTO seen (key, fp_hash, seen_at)
+		SELECT k, f, a FROM unnest($1::text[], $2::bytea[], $3::timestamptz[]) AS t(k, f, a)
+		ON CONFLICT (key, fp_hash) DO UPDATE SET seen_at = EXCLUDED.seen_at
+			WHERE seen.seen_at < EXCLUDED.seen_at - interval '7 days'
+		RETURNING key, (seen_at AT TIME ZONE 'UTC')::date`, keys, fps, ats)
+	if err != nil {
+		return err
+	}
+	type kd struct {
+		key string
+		day time.Time
+	}
+	counts := map[kd]int64{}
+	for rows.Next() {
+		var c kd
+		if err := rows.Scan(&c.key, &c.day); err != nil {
+			rows.Close()
+			return err
+		}
+		counts[c]++
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(counts) == 0 {
+		return tx.Commit(ctx)
+	}
+
+	cs := make([]kd, 0, len(counts))
+	for c := range counts {
+		cs = append(cs, c)
+	}
+	sort.Slice(cs, func(i, j int) bool {
+		if cs[i].key != cs[j].key {
+			return cs[i].key < cs[j].key
+		}
+		return cs[i].day.Before(cs[j].day)
+	})
+	ck := make([]string, len(cs))
+	cd := make([]time.Time, len(cs))
+	cn := make([]int64, len(cs))
+	for i, c := range cs {
+		ck[i], cd[i], cn[i] = c.key, c.day, counts[c]
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO page_views (key, day, views)
+		SELECT k, d, n FROM unnest($1::text[], $2::date[], $3::bigint[]) AS t(k, d, n)
+		ON CONFLICT (key, day) DO UPDATE SET views = page_views.views + EXCLUDED.views`,
+		ck, cd, cn); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Store) Total(ctx context.Context, key string) (int64, error) {

@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	natsserver "github.com/nats-io/nats-server/v2/server"
+
+	"github.com/oz/view-counter/internal/ingest"
 	"github.com/oz/view-counter/internal/store"
 	"github.com/oz/view-counter/internal/testdb"
 )
@@ -29,7 +32,7 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	t.Cleanup(st.Close)
-	return &env{h: New(st, secret), db: db, st: st}
+	return &env{h: New(st, secret, nil), db: db, st: st}
 }
 
 func (e *env) do(method, target, body string) *httptest.ResponseRecorder {
@@ -167,7 +170,7 @@ func TestDedupeDependsOnSecret(t *testing.T) {
 	wantStatus(t, e.hit("vid1", "alice"), 204)
 
 	// Rotating the secret resets dedupe.
-	rotated := New(e.st, []byte("another-secret"))
+	rotated := New(e.st, []byte("another-secret"), nil)
 	rec := httptest.NewRecorder()
 	rotated.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/hit",
 		strings.NewReader(`{"key":"vid1","fingerprint":"alice"}`)))
@@ -346,4 +349,105 @@ func TestErrorResponsesAreJSON(t *testing.T) {
 	if out["error"] == "" {
 		t.Fatalf("missing error message: %s", rec.Body.String())
 	}
+}
+
+func newV2Env(t *testing.T) (*env, context.CancelFunc) {
+	t.Helper()
+	srv, err := natsserver.NewServer(&natsserver.Options{
+		Port: -1, JetStream: true, StoreDir: t.TempDir(), NoLog: true, NoSigs: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Start()
+	if !srv.ReadyForConnections(10 * time.Second) {
+		t.Fatal("nats server did not start")
+	}
+	t.Cleanup(srv.Shutdown)
+
+	e := newEnv(t)
+	q, err := ingest.Connect(context.Background(), srv.ClientURL(), ingest.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(q.Close)
+	e.h = New(e.st, secret, q)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { q.Run(ctx, e.st); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	return e, cancel
+}
+
+func (e *env) hitV2(key, fingerprint string) *httptest.ResponseRecorder {
+	b, _ := json.Marshal(map[string]string{"key": key, "fingerprint": fingerprint})
+	return e.do("POST", "/v2/hit", string(b))
+}
+
+func waitViews(t *testing.T, e *env, path string, want int64) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var got int64
+	for time.Now().Before(deadline) {
+		rec := e.do("GET", path, "")
+		wantStatus(t, rec, 200)
+		var out struct{ Views int64 }
+		decode(t, rec, &out)
+		if got = out.Views; got == want {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("%s = %d, want %d", path, got, want)
+}
+
+func TestV2HitReturns202AndEventuallyCounts(t *testing.T) {
+	e, _ := newV2Env(t)
+	wantStatus(t, e.hitV2("vid1", "alice"), 202)
+	wantStatus(t, e.hitV2("vid1", "alice"), 202) // duplicate is accepted, counted once
+	wantStatus(t, e.hitV2("vid1", "bob"), 202)
+	waitViews(t, e, "/v2/views?key=vid1", 2)
+	// /v1 reads the same data.
+	waitViews(t, e, "/v1/views?key=vid1", 2)
+}
+
+func TestV2HitValidation(t *testing.T) {
+	e, _ := newV2Env(t)
+	for name, body := range map[string]string{
+		"bad json":       `{`,
+		"bad key":        `{"key":"a b","fingerprint":"x"}`,
+		"no fingerprint": `{"key":"vid1","fingerprint":""}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			wantStatus(t, e.do("POST", "/v2/hit", body), 400)
+		})
+	}
+}
+
+func TestV2TopAndIngestLag(t *testing.T) {
+	e, _ := newV2Env(t)
+	for _, v := range []string{"a", "b", "c"} {
+		wantStatus(t, e.hitV2("hot", v), 202)
+	}
+	wantStatus(t, e.hitV2("cold", "a"), 202)
+	waitViews(t, e, "/v2/views?key=hot", 3)
+
+	rec := e.do("GET", "/v2/top?n=1", "")
+	wantStatus(t, rec, 200)
+	var top struct{ Top []store.KeyViews }
+	decode(t, rec, &top)
+	if len(top.Top) != 1 || top.Top[0].Key != "hot" {
+		t.Fatalf("top = %+v", top.Top)
+	}
+
+	rec = e.do("GET", "/v2/ingest", "")
+	wantStatus(t, rec, 200)
+	var lag ingest.Lag
+	decode(t, rec, &lag)
+}
+
+func TestV2RoutesAbsentWithoutQueue(t *testing.T) {
+	e := newEnv(t)
+	wantStatus(t, e.hitV2("vid1", "alice"), 404)
 }

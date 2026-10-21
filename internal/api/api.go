@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/oz/view-counter/internal/ingest"
 	"github.com/oz/view-counter/internal/store"
 )
 
@@ -26,21 +27,37 @@ const (
 
 var keyRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
+// Queue is the JetStream write path behind the /v2 endpoints.
+type Queue interface {
+	Publish(ctx context.Context, key string, fpHash []byte) error
+	Lag(ctx context.Context) (ingest.Lag, error)
+}
+
 type API struct {
 	store  *store.Store
 	secret []byte
+	queue  Queue
 }
 
-func New(s *store.Store, secret []byte) http.Handler {
-	a := &API{store: s, secret: secret}
+// New builds the handler. With a nil queue only the /v1 endpoints exist.
+func New(s *store.Store, secret []byte, q Queue) http.Handler {
+	a := &API{store: s, secret: secret, queue: q}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/hit", a.hit)
 	mux.HandleFunc("GET /v1/views", a.views)
 	mux.HandleFunc("GET /v1/top", a.top)
+	if q != nil {
+		mux.HandleFunc("POST /v2/hit", a.hitAsync)
+		mux.HandleFunc("GET /v2/views", a.views)
+		mux.HandleFunc("GET /v2/top", a.top)
+		mux.HandleFunc("GET /v2/ingest", a.ingestLag)
+	}
 	return mux
 }
 
-func (a *API) hit(w http.ResponseWriter, r *http.Request) {
+// parseHit validates the request body and returns the key and the truncated
+// HMAC of the fingerprint. It writes the 400 itself when the body is bad.
+func (a *API) parseHit(w http.ResponseWriter, r *http.Request) (key string, fpHash []byte, ok bool) {
 	var body struct {
 		Key         string `json:"key"`
 		Fingerprint string `json:"fingerprint"`
@@ -48,29 +65,64 @@ func (a *API) hit(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpError(w, http.StatusBadRequest, "invalid JSON body")
-		return
+		return "", nil, false
 	}
 	if !keyRE.MatchString(body.Key) {
 		httpError(w, http.StatusBadRequest, "invalid key")
-		return
+		return "", nil, false
 	}
 	if body.Fingerprint == "" || len(body.Fingerprint) > maxFPLen {
 		httpError(w, http.StatusBadRequest, "invalid fingerprint")
-		return
+		return "", nil, false
 	}
 
 	mac := hmac.New(sha256.New, a.secret)
 	mac.Write([]byte(body.Fingerprint))
-	fpHash := mac.Sum(nil)[:16]
+	return body.Key, mac.Sum(nil)[:16], true
+}
+
+func (a *API) hit(w http.ResponseWriter, r *http.Request) {
+	key, fpHash, ok := a.parseHit(w, r)
+	if !ok {
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), writeTimeout)
 	defer cancel()
-	if _, err := a.store.Hit(ctx, body.Key, fpHash); err != nil {
+	if _, err := a.store.Hit(ctx, key, fpHash); err != nil {
 		log.Printf("hit: %v", err)
 		httpError(w, http.StatusServiceUnavailable, "try again")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// hitAsync answers 202 once JetStream has stored the hit. Whether it counted
+// is decided later by the writer.
+func (a *API) hitAsync(w http.ResponseWriter, r *http.Request) {
+	key, fpHash, ok := a.parseHit(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), writeTimeout)
+	defer cancel()
+	if err := a.queue.Publish(ctx, key, fpHash); err != nil {
+		log.Printf("publish: %v", err)
+		httpError(w, http.StatusServiceUnavailable, "try again")
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (a *API) ingestLag(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), readTimeout)
+	defer cancel()
+	lag, err := a.queue.Lag(ctx)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	writeJSON(w, lag)
 }
 
 func (a *API) views(w http.ResponseWriter, r *http.Request) {

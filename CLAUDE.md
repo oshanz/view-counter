@@ -8,10 +8,10 @@ Implemented. Tool versions are pinned in `mise.toml` (Go 1.25.0); Postgres runs 
 
 - `mise run db` starts Postgres, `mise run run` starts the service on `:8080`, `mise run test` runs tests (none written yet).
 - k6 (pinned in `mise.toml`) non-functional tests live in `loadtest/`: `mise run stress` (ramp to 200 writes/s and 50 reads/s, mostly on one hot key). It starts the service itself.
-- Env: `HMAC_SECRET` (required, dev default in `mise.toml`), `DATABASE_URL`, `ADDR`.
+- Env: `HMAC_SECRET` (required, dev default in `mise.toml`), `DATABASE_URL`, `ADDR`, `NATS_URL` (optional, enables `/v2`).
 - To reset the schema: `docker compose down -v`.
 
-The design lives in `docs/postgres-only-benchmark.md` (Mermaid diagrams, decisions, stress test results).
+The design lives in `docs/postgres-only-benchmark.md` (Mermaid diagrams, decisions, stress test results). The optional JetStream `/v2` write path is documented in `docs/jetstream-v2.md`.
 
 ## Intended architecture
 
@@ -22,6 +22,17 @@ A Go page-view-counting API service sized for ~1 write/sec and ~1 read/sec. Keep
 - **No** Redis, queues, in-memory counters, batching, flush loops, sharding or cardinality caps. If volume grows, add batching in front of the same schema.
 
 Layout: `cmd/viewcounter/` (wiring, env config, graceful shutdown), `internal/api/`, `internal/store/`, `migrations/`.
+
+## JetStream write path (`/v2`, optional)
+
+Set `NATS_URL` (compose runs `nats` on `:4222`) to enable it. Without it only `/v1` exists.
+
+- `POST /v2/hit` validates and HMACs like `/v1/hit`, publishes to JetStream stream `HITS` (work queue, file storage, `DiscardNew`), and returns 202 once the publish is acked, or 503 if it fails.
+- `internal/ingest` runs a pull consumer that fetches up to 1000 hits per 250ms and calls `store.HitBatch` (one dedupe upsert into `seen`, one aggregated upsert into `page_views`), then acks. A failed batch is nak'd and retried; redelivery is safe because `seen` counts each (key, fingerprint) once.
+- A hit counts on the day JetStream stored it, not the day the writer ran it.
+- `GET /v2/views` and `GET /v2/top` are the same handlers as `/v1`. `GET /v2/ingest` reports consumer lag (`pending`, `ack_pending`).
+- Shutdown: HTTP drains first, then the consumer finishes its fetched batch; unfetched hits stay in the stream.
+- Tests start an in-process NATS server, so they need no Docker for NATS.
 
 ## Decisions made (override only if the user says so)
 
