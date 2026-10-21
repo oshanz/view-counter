@@ -156,12 +156,38 @@ Hits not yet fetched stay in the stream and are picked up on the next start. Not
 
 All pass with `-race`. A manual smoke run of the built binary against a standalone NATS server confirmed 202 responses, correct dedupe and a clean SIGTERM.
 
+## Read load test (`GET /v2/views`)
+
+`mise run stress-views` runs `loadtest/views.js`: six steps of 20s each (5s apart) at a fixed arrival rate, each step reported separately. Mix: 70% total of one hot key, 20% total of a cold key (1000 keys), 10% daily series of the hot key. Setup seeds 1,000 hits on the hot key and 1,000 keys with one hit each through `/v2/hit`, waits for the writer to drain, and checks the hot key's count. Thresholds per step: p95 < 500ms, under 1% failed, under 1% of offered requests dropped. Override with `STEPS`, `STEP_DURATION`, `SEED_KEYS`, `HOT_HITS` and `MAX_VUS`. `STOP_ON_FAIL=1` aborts the run at the first failing step.
+
+| Offered reads/s | p95 | p99 | Failed | Dropped |
+|---|---|---|---|---|
+| 500 | 0.96ms | 1.1ms | 0 | 0 |
+| 1,000 | 0.95ms | 1.1ms | 0 | 0 |
+| 2,500 | 0.95ms | 1.4ms | 0 | 0 |
+| 5,000 | 0.84ms | 3.8ms | 0 | 0 |
+| 7,500 | 2.0ms | 19.8ms | 0 | 0 |
+| 10,000 | 14.2ms | 30.0ms | 0 | 0 |
+
+530,030 requests, none failed, none dropped. Every step passed, so the ceiling was not found. Latency starts to climb at 7,500 reads/s and p95 at 10,000 is about 15 times that at 5,000, which is the start of saturation.
+
+This does not prove 10k reads/s in production:
+
+- **Small data set.** 1,000 views on the hot key and 1,000 cold keys. A table with millions of keys and a longer history reads slower.
+- **Hot key stays cached.** 70% of requests hit one key, which Postgres keeps in memory.
+- **No concurrent writes.** The test ran reads only.
+- **Same machine.** k6, the service and Postgres share one host, so the result is contended and not a clean ceiling.
+- **Short steps.** 20s each.
+- **`/v2/top` not tested.** It is the likelier bottleneck.
+
+Finding the ceiling: `STEPS=20000,30000,50000 STOP_ON_FAIL=1 MAX_VUS=10000 mise run stress-views`. The 20k step failed within 3 seconds. k6 offered 20,000 reads/s but completed about 10,600/s, dropped about a quarter of the offered requests, and p95 rose to 246ms with no failed requests. On this machine the ceiling is therefore about 10 to 11k reads/s. The 30k and 50k steps were never reached. This run does not show whether the service, Postgres or k6 itself is the limit, since all three share the host.
+
 ## Limits and not yet measured
 
-- **No load test.** `loadtest/stress.js` targets `/v1/hit`. Before relying on 10k writes/s, add a path switch to the k6 script, reset the database first, preload a realistic data set, and run k6 from a separate machine (the same gaps listed in the benchmark doc).
+- **Write load not tested.** `loadtest/stress.js` targets `/v1/hit`; `loadtest/views.js` covers reads only. Before relying on 10k writes/s, add a path switch to the k6 script, reset the database first, preload a realistic data set, and run k6 from a separate machine (the same gaps listed in the benchmark doc).
 - **Single NATS node, one replica.** For durability across node loss run a 3 node cluster and set `Replicas: 3` on the stream. Acked writes are replicated to a quorum but not necessarily fsynced at once; check JetStream's `sync_interval` for your version if a simultaneous power loss is a concern.
 - **One stream is one Raft group** on a cluster, so one leader takes all publishes. If that saturates, split into several streams by hash of the key.
 - **Single writer loop per instance.** One goroutine fetches and writes batches. If Postgres, not the loop, is the limit, add instances. If the loop is the limit, run more consumers on the same durable consumer.
-- **Reads are unchanged.** 10k reads/s is not addressed by `/v2`. See the read-path options in the scaling discussion: an in-process cache with `singleflight`, a precomputed top-N, and a `page_totals` table. None of these are implemented.
+- **Reads are unchanged.** `/v2` does nothing for read capacity. `GET /v2/views` held 10k reads/s in the load test above, but on a small data set with a hot key and no concurrent writes, and `/v2/top` was not tested. See the read-path options in the scaling discussion: an in-process cache with `singleflight`, a precomputed top-N, and a `page_totals` table. None of these are implemented.
 - **Callers cannot tell a duplicate from a counted hit.** Both return 202.
 - **Dropped on a bad message.** A malformed message is terminated, not dead-lettered.

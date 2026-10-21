@@ -22,3 +22,9 @@ run = "go test ./..."
 description = "k6 ramp to 200 writes/s and 50 reads/s on a hot key"
 depends = ["db"]
 run = "loadtest/run.sh loadtest/stress.js"
+
+[tasks.stress-views]
+description = "k6 stepped read load on GET /v2/views, 500 to 10k reads/s"
+depends = ["db"]
+env = { NATS_URL = "nats://127.0.0.1:4222" }
+run = "loadtest/run.sh loadtest/views.js"
