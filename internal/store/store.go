@@ -9,6 +9,7 @@ import (
 	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type Store struct {
@@ -34,7 +35,12 @@ func New(ctx context.Context, url string, traced ...bool) (*Store, error) {
 	}
 	trace := len(traced) > 0 && traced[0]
 	if trace {
-		cfg.ConnConfig.Tracer = otelpgx.NewTracer()
+		// otelpgx only sets the current semconv key db.system.name; SigNoz's
+		// DB Calls view filters on the legacy db.system and db.name.
+		cfg.ConnConfig.Tracer = otelpgx.NewTracer(otelpgx.WithTracerAttributes(
+			attribute.String("db.system", "postgresql"),
+			attribute.String("db.name", cfg.ConnConfig.Database),
+		))
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
