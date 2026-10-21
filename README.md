@@ -48,7 +48,7 @@ The `/v2` routes exist only when `NATS_URL` is set.
 
 ## Load tests
 
-k6 tests live in `loadtest/`: `mise run stress` (write and read ramp), `mise run stress-views` (`GET /v2/views`), `mise run stress-all` (mixed, all endpoints). Results are in the docs above.
+k6 tests live in `loadtest/`: `mise run stress` (write and read ramp), `mise run stress-views` (`GET /v2/views`), `mise run stress-hit-v2` (`POST /v2/hit`), `mise run stress-all` (mixed, all endpoints). Results are in the docs above.
 
 ## Layout
 

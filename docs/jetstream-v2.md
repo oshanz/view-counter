@@ -196,9 +196,27 @@ Both runs above were before `page_totals` (`migrations/002_page_totals.sql`). Af
 
 The ceiling did not move, and 10k looked slightly worse than the first run (p95 14ms, nothing dropped). The dev database also had 47,711 keys by then, against far fewer in the first run, so the two are not directly comparable. `Total` was already a one-row read on the test's hot key, so `page_totals` had nothing to remove here. It should matter for keys with long histories and for `/v2/top`, neither of which this test exercises. The limit is more likely per-request overhead, the connection pool or k6 sharing the host.
 
+## Write load test (`POST /v2/hit`)
+
+`mise run stress-hit-v2` runs `loadtest/hit_v2.js`: steps of 20s each (5s apart) at a fixed arrival rate, each reported separately. 70% of hits go to one hot key and the rest spread over 1,000 keys; every fingerprint is unique, so every hit is a new viewer. Thresholds per step: p95 < 500ms, under 1% failed, under 1% of offered requests dropped. Teardown waits for the writer to drain and logs the hot key's count in Postgres, which should equal `acked_hot_hits`. Override with `STEPS`, `STEP_DURATION`, `SEED_KEYS`, `MAX_VUS`; `STOP_ON_FAIL=1` aborts at the first failing step.
+
+| Offered writes/s | p95 | p99 | Failed | Dropped | Result |
+|---|---|---|---|---|---|
+| 200 | 1.37ms | 1.7ms | 0 | 0 | pass |
+| 500 | 1.33ms | 2.0ms | 0 | 0 | pass |
+| 1,000 | 1.37ms | 2.4ms | 0 | 0 | pass |
+| 2,000 | 1.56ms | 3.3ms | 0 | 0 | pass |
+| 4,000 | 2.35ms | 7.0ms | 0 | 0 | pass |
+| 10,000 | 40.9ms | 78.9ms | 0 | 228 (0.1%) | pass |
+| 15,000 | 98.3ms | 141ms | 0 | 13,960 (4.7%) | fail |
+
+The first five rows are one run (154,005 hits); the last two are a separate run with `STEPS=10000,15000 MAX_VUS=10000` (485,824 hits). In both, every acked hit was counted: `page_totals` matched the acked totals exactly and the writer lag was 0 after the drain wait.
+
+At 15k, k6 completed about 14,300 requests/s of the 15,000 offered; the step failed only on dropped iterations, with no failed requests. The service ceiling is therefore above 10k writes/s on this machine, and the run does not show whether the service, NATS or k6 is the limit, since all share the host. Latency started to climb between 4k and 10k. Writer lag during the run was not sampled, only after it.
+
 ## Limits and not yet measured
 
-- **Write load not tested.** `loadtest/stress.js` targets `/v1/hit`; `loadtest/views.js` covers reads only. Before relying on 10k writes/s, add a path switch to the k6 script, reset the database first, preload a realistic data set, and run k6 from a separate machine (the same gaps listed in the benchmark doc).
+- **Write load tested only briefly.** See the write load test above: 10k writes/s passed on a small data set, same-host k6, 20s steps, and unique fingerprints only (no duplicates). Not covered: a realistic preloaded data set, a separate load machine, long runs (the hourly `seen` cleanup and backlog growth), and writer lag sampled during the run.
 - **Single NATS node, one replica.** For durability across node loss run a 3 node cluster and set `Replicas: 3` on the stream. Acked writes are replicated to a quorum but not necessarily fsynced at once; check JetStream's `sync_interval` for your version if a simultaneous power loss is a concern.
 - **One stream is one Raft group** on a cluster, so one leader takes all publishes. If that saturates, split into several streams by hash of the key.
 - **Single writer loop per instance.** One goroutine fetches and writes batches. If Postgres, not the loop, is the limit, add instances. If the loop is the limit, run more consumers on the same durable consumer.

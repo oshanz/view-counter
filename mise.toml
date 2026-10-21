@@ -38,3 +38,9 @@ description = "k6 mixed load on every /v1 and /v2 endpoint at once"
 depends = ["db"]
 env = { NATS_URL = "nats://127.0.0.1:4222" }
 run = "loadtest/run.sh loadtest/all.js"
+
+[tasks.stress-hit-v2]
+description = "k6 stepped write load on POST /v2/hit, 200 to 4k writes/s"
+depends = ["db"]
+env = { NATS_URL = "nats://127.0.0.1:4222" }
+run = "loadtest/run.sh loadtest/hit_v2.js"
