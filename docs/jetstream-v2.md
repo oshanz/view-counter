@@ -1,6 +1,6 @@
 # JetStream write path (`/v2`)
 
-An optional asynchronous write path for when one transaction per hit stops scaling (the Postgres-only design breaks at about 1,000 to 2,000 writes/s, see [postgres-only-benchmark.md](postgres-only-benchmark.md)). Target: 10k writes/s and 10k reads/s. The schema, the dedupe rule (a fingerprint counts once per key per 7 days) and the request body are unchanged from `/v1`.
+An optional asynchronous write path for when one transaction per hit stops scaling (the Postgres-only design breaks at about 1,000 to 2,000 writes/s, see [postgres-direct-v1.md](postgres-direct-v1.md)). Target: 10k writes/s and 10k reads/s. The schema, the dedupe rule (a fingerprint counts once per key per 7 days) and the request body are unchanged from `/v1`.
 
 Status: implemented and covered by tests. **Not load tested.** No throughput number in this document has been measured.
 
