@@ -10,7 +10,7 @@
 // /v2 must be enabled (NATS_URL set).
 import http from 'k6/http';
 import exec from 'k6/execution';
-import { check, sleep } from 'k6';
+import { sleep } from 'k6';
 import { Counter } from 'k6/metrics';
 
 const BASE = __ENV.BASE_URL || 'http://localhost:8080';
@@ -19,7 +19,11 @@ const STEP_DURATION = __ENV.STEP_DURATION || '20s';
 const SEED_KEYS = Number(__ENV.SEED_KEYS || 1000);
 const MAX_VUS = Number(__ENV.MAX_VUS || 2000);
 const STOP_ON_FAIL = __ENV.STOP_ON_FAIL === '1';
-const JSON_HDR = { headers: { 'Content-Type': 'application/json' } };
+const HIT_PARAMS = {
+  headers: { 'Content-Type': 'application/json' },
+  // Marks non-202 as failed in http_req_failed, so no per-request check() is needed.
+  responseCallback: http.expectedStatuses(202),
+};
 
 const stepSeconds = Number(STEP_DURATION.replace('s', ''));
 const GAP_SECONDS = 5;
@@ -38,7 +42,7 @@ STEPS.forEach((rate, n) => {
     timeUnit: '1s',
     duration: STEP_DURATION,
     startTime: `${n * (stepSeconds + GAP_SECONDS)}s`,
-    preAllocatedVUs: Math.min(MAX_VUS, Math.max(50, Math.round(rate / 10))),
+    preAllocatedVUs: Math.min(MAX_VUS, Math.max(20, Math.round(rate / 50))),
     maxVUs: MAX_VUS,
     tags: { rate: String(rate) },
   };
@@ -52,6 +56,8 @@ export const options = {
   scenarios,
   thresholds,
   discardResponseBodies: true,
+  // The thresholds need scenario; every other system tag is dropped to cut per-sample work.
+  systemTags: ['status', 'scenario'],
   summaryTrendStats: ['avg', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
 };
 
@@ -70,8 +76,8 @@ export function hit(data) {
   const isHot = i % 10 < 7;
   const key = isHot ? `v2h-${data.run}-hot` : `v2h-${data.run}-${i % SEED_KEYS}`;
   const res = http.post(`${BASE}/v2/hit`,
-    JSON.stringify({ key, fingerprint: `${data.run}-${__VU}-${__ITER}` }), JSON_HDR);
-  if (check(res, { 'hit is 202': (r) => r.status === 202 })) {
+    `{"key":"${key}","fingerprint":"${data.run}-${__VU}-${__ITER}"}`, HIT_PARAMS);
+  if (res.status === 202) {
     acked.add(1);
     if (isHot) ackedHot.add(1);
   }

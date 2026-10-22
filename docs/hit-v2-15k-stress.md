@@ -83,6 +83,24 @@ The dropped-iterations threshold (under 12,000) failed; latency and failure thre
 
 Integrity held: the hot key had 804,560 views in Postgres, equal to `acked_hot_hits`, and writer lag was 0 pending, 0 ack_pending after the drain wait. Draining with a single ingest worker kept up at this rate.
 
+## 20k run with a lighter k6 script (2026-10-23)
+
+Same command as the first 20k run (`STEPS=20000 STEP_DURATION=60s MAX_VUS=5000`, `NATS_URL` set, traces sampled at 1%), but `loadtest/hit_v2.js` was changed to cut k6's per-request work: `systemTags: ['status', 'scenario']`, a `responseCallback` of `http.expectedStatuses(202)` instead of `check()`, `preAllocatedVUs` of `max(20, rate/50)`, and a template-string body instead of `JSON.stringify`. `ingestWorkers = 1` is now the committed value. CPU, RAM and SigNoz traces were not collected.
+
+| | 20k step | first 20k run |
+|---|---|---|
+| Throughput | 16.5k/s of 20k offered (1,146,545 hits acked) | 15.7k/s |
+| p95 | 64.6 ms | 126 ms |
+| p99 | 104 ms | 190 ms |
+| Max | 278 ms | 417 ms |
+| Dropped iterations | 53,523 (4.5%) | 51,181 (4.3%) |
+| Failed requests | 0% | 0% |
+| VUs used | 1,348 peak (1,737 allocated) | 3,026 peak |
+
+The dropped-iterations threshold (under 12,000) failed again; latency and failure thresholds passed. Latency and VU use fell by about half and throughput rose about 5%, so the service still saturates near 16k/s, but each request waits less. This is one run per script version, so the effect of the script change is not separated from run-to-run noise, and k6's own CPU was not measured.
+
+Integrity held: the hot key had 802,583 views in Postgres, equal to `acked_hot_hits`, and writer lag was 0 pending, 0 ack_pending after the drain wait.
+
 ## `/v1/hit` at 20k (2026-10-22, for comparison)
 
 `NATS_URL= STEPS=20000 STEP_DURATION=60s MAX_VUS=5000 loadtest/run.sh loadtest/hit_v1.js`, traces sampled at 1%. `loadtest/hit_v1.js` is `hit_v2.js` pointed at `POST /v1/hit` (expects 204, no drain wait). Same machine and the same uncommitted `ingestWorkers = 1`, which does not affect `/v1`. CPU, RAM and traces were not collected.
@@ -110,7 +128,7 @@ Integrity: the hot key holds 27,202 views in Postgres against 26,872 acked, so 3
 
 ## Next
 
-- Run k6 on another machine, or pin it to separate cores with `taskset`, and repeat three times at 10k, 15k and 20k (20k has one run so far).
+- Run k6 on another machine, or pin it to separate cores with `taskset`, and repeat three times at 10k, 15k and 20k (20k has two runs so far, with different k6 scripts).
 - Capture per-core, per-second CPU during the load (`mpstat -P ALL 1`) to check for a pinned core, such as the one NATS uses for the stream.
 
 ## What changed to collect this
