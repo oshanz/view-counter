@@ -19,7 +19,7 @@ import (
 )
 
 // ingestWorkers is how many fetch loops drain the /v2 stream.
-const ingestWorkers = 6
+const ingestWorkers = 1
 
 func main() {
 	dbURL := env("DATABASE_URL", "postgres://viewcounter:viewcounter@localhost:5433/viewcounter")

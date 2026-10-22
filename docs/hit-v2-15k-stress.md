@@ -65,6 +65,43 @@ Host memory: about 23.3 GB used, 8.4 GB cached, 1.2 GB free (down from 2.1 GB), 
 
 Go runtime: about 9 GC cycles/s, with stop-the-world pauses taking about 2.4% of wall time.
 
+## 20k run (2026-10-22)
+
+`STEPS=20000 STEP_DURATION=60s MAX_VUS=5000` with `NATS_URL` set, traces sampled at 1%. The working tree had `ingestWorkers = 1` (uncommitted; the committed value is 6). CPU, RAM and SigNoz traces were not collected for this run.
+
+| | 20k step |
+|---|---|
+| Throughput | 15.7k/s of 20k offered (1,149,371 hits acked) |
+| p95 | 126 ms |
+| p99 | 190 ms |
+| Max | 417 ms |
+| Dropped iterations | 51,181 (4.3%) |
+| Failed requests | 0% |
+| VUs used | 3,026 peak (of 5,000) |
+
+The dropped-iterations threshold (under 12,000) failed; latency and failure thresholds passed. Throughput matches the 14.5k/s of the 15k runs rather than scaling with the offered rate, and p95 is above all three 15k runs, so the system saturates at about 15k/s on this machine. As before, this does not separate the service from k6 and the shared host.
+
+Integrity held: the hot key had 804,560 views in Postgres, equal to `acked_hot_hits`, and writer lag was 0 pending, 0 ack_pending after the drain wait. Draining with a single ingest worker kept up at this rate.
+
+## `/v1/hit` at 20k (2026-10-22, for comparison)
+
+`NATS_URL= STEPS=20000 STEP_DURATION=60s MAX_VUS=5000 loadtest/run.sh loadtest/hit_v1.js`, traces sampled at 1%. `loadtest/hit_v1.js` is `hit_v2.js` pointed at `POST /v1/hit` (expects 204, no drain wait). Same machine and the same uncommitted `ingestWorkers = 1`, which does not affect `/v1`. CPU, RAM and traces were not collected.
+
+| | `/v1/hit` 20k step |
+|---|---|
+| Throughput | about 995 req/s of 20k offered |
+| Acked (204) | 39,199 |
+| Failed requests | 39.4% (25,457), Postgres timeouts |
+| Latency | avg 4.76 s, p95 5 s (the 5 s ceiling), max 5.03 s |
+| Dropped iterations | 1,135,332 (threshold 12,000) |
+| VUs | 5,000 (the maximum) |
+
+All three thresholds failed. The service log shows about 25k `context deadline exceeded` errors and a few `write tcp ...:5433: i/o timeout`.
+
+Every `/v1` hit is its own synchronous Postgres transaction (dedupe insert plus upsert), and 70% of hits go to one hot key, so they queue on that `page_views` row. The likely cause is that row lock, but I did not confirm it with Postgres lock or wait data. `/v2` batches those writes and reached about 15.7k/s on the same machine.
+
+Integrity: the hot key holds 27,202 views in Postgres against 26,872 acked, so 330 hits committed but were reported as failures (timeouts after the commit). No acked hit was lost.
+
 ## Conclusions
 
 - Postgres, the writer, the pool and memory were not the limit.
@@ -73,7 +110,7 @@ Go runtime: about 9 GC cycles/s, with stop-the-world pauses taking about 2.4% of
 
 ## Next
 
-- Run k6 on another machine, or pin it to separate cores with `taskset`, and repeat three times at 10k, 15k and 20k.
+- Run k6 on another machine, or pin it to separate cores with `taskset`, and repeat three times at 10k, 15k and 20k (20k has one run so far).
 - Capture per-core, per-second CPU during the load (`mpstat -P ALL 1`) to check for a pinned core, such as the one NATS uses for the stream.
 
 ## What changed to collect this
