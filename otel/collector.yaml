@@ -14,6 +14,18 @@ receivers:
       disk: {}
       filesystem: {}
       network: {}
+      # The service and k6 run on the host, not in containers. loadtest/run.sh
+      # builds the service binary named viewcounter so it matches by name.
+      process:
+        include:
+          names: ["viewcounter", "k6"]
+          match_type: strict
+        mute_process_name_error: true
+        mute_process_exe_error: true
+        mute_process_io_error: true
+        mute_process_user_error: true
+        metrics:
+          process.cpu.utilization: {enabled: true}
   postgresql:
     endpoint: postgres:5432
     transport: tcp

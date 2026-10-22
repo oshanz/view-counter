@@ -11,7 +11,8 @@ base=${BASE_URL:-http://localhost${addr}}
 # Export metrics every 5s (the SDK default is 60s) so a 20s load step has several points.
 export OTEL_METRIC_EXPORT_INTERVAL=${OTEL_METRIC_EXPORT_INTERVAL:-5000}
 
-bin=$(mktemp)
+bindir=$(mktemp -d)
+bin=$bindir/viewcounter
 log=$(mktemp)
 go build -o "$bin" ./cmd/viewcounter
 ADDR=$addr "$bin" >"$log" 2>&1 &
@@ -19,7 +20,7 @@ pid=$!
 cleanup() {
   kill "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
-  rm -f "$bin"
+  rm -rf "$bindir"
   if [ -s "$log" ]; then echo "--- service log ---"; cat "$log"; fi
   rm -f "$log"
 }

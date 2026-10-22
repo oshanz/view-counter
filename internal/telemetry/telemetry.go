@@ -59,6 +59,9 @@ func Setup(ctx context.Context, service string) (func(context.Context) error, er
 	if err := runtime.Start(); err != nil {
 		return nil, err
 	}
+	if err := observeGC(); err != nil {
+		return nil, err
+	}
 
 	return func(ctx context.Context) error {
 		return errors.Join(tp.Shutdown(ctx), mp.Shutdown(ctx))
