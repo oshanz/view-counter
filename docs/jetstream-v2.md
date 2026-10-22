@@ -119,6 +119,10 @@ erDiagram
 - **Privacy is unchanged.** Only the truncated HMAC (16 bytes) and the key are published. The raw fingerprint never reaches NATS or Postgres.
 - **Payload.** 16 bytes of fingerprint hash followed by the key. Both are fixed by validation, so no delimiter or JSON is needed.
 
+## Tracing
+
+`POST /v2/hit` adds a `nats publish` producer span and injects the W3C `traceparent` into the NATS message headers. The writer handles up to 1000 hits per batch, so a batch cannot have a single parent. The `ingest batch` span (with the Postgres spans as children) joins the trace of the first sampled message in the batch, which also makes it sampled; a fresh root would be sampled only at the base rate. It links to the publish spans of the other sampled messages. Each sampled message also gets a short `ingest hit` span in its own trace, linked to the batch span. Batches with no sampled message add no spans.
+
 ## Shutdown
 
 ```mermaid

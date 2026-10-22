@@ -7,6 +7,10 @@ import (
 	"time"
 
 	natsserver "github.com/nats-io/nats-server/v2/server"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/oz/view-counter/internal/ingest"
 	"github.com/oz/view-counter/internal/store"
@@ -133,5 +137,53 @@ func TestLagDrainsToZero(t *testing.T) {
 			t.Fatalf("lag = %+v, want zero", lag)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestBatchSpanJoinsPublishTrace(t *testing.T) {
+	exp := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp))
+	prevTP, prevProp := otel.GetTracerProvider(), otel.GetTextMapPropagator()
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() { otel.SetTracerProvider(prevTP); otel.SetTextMapPropagator(prevProp) })
+
+	q, st := setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { q.Run(ctx, st); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+
+	if err := q.Publish(ctx, "vid1", fp("alice")); err != nil {
+		t.Fatal(err)
+	}
+	waitTotal(t, st, "vid1", 1)
+
+	var pub, batch, hit *tracetest.SpanStub
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && (pub == nil || batch == nil || hit == nil) {
+		spans := exp.GetSpans()
+		for i := range spans {
+			switch spans[i].Name {
+			case "nats publish":
+				pub = &spans[i]
+			case "ingest batch":
+				batch = &spans[i]
+			case "ingest hit":
+				hit = &spans[i]
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if pub == nil || batch == nil || hit == nil {
+		t.Fatalf("want publish, batch and hit spans, got %v", exp.GetSpans())
+	}
+	if batch.SpanContext.TraceID() != pub.SpanContext.TraceID() || batch.Parent.SpanID() != pub.SpanContext.SpanID() {
+		t.Fatalf("batch parent = %s in trace %s, want publish span %s in trace %s",
+			batch.Parent.SpanID(), batch.SpanContext.TraceID(), pub.SpanContext.SpanID(), pub.SpanContext.TraceID())
+	}
+	if hit.Parent.SpanID() != pub.SpanContext.SpanID() ||
+		len(hit.Links) != 1 || hit.Links[0].SpanContext.SpanID() != batch.SpanContext.SpanID() {
+		t.Fatalf("hit span parent = %s links = %v, want publish parent and a link to the batch", hit.Parent.SpanID(), hit.Links)
 	}
 }

@@ -29,6 +29,15 @@ services:
       timeout: 3s
       retries: 15
 
+  # Exposes NATS and JetStream monitoring data as Prometheus metrics on :7777
+  # for the collector below.
+  nats-exporter:
+    image: natsio/prometheus-nats-exporter:0.17.3
+    command: ["-jsz=all", "-varz", "-connz", "http://nats:8222"]
+    depends_on:
+      nats:
+        condition: service_healthy
+
   # Scrapes host, Postgres and container metrics and ships them to the local
   # SigNoz ingester on the host (port 4317). Needs SigNoz running; otherwise it
   # just retries.
@@ -48,6 +57,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      nats-exporter:
+        condition: service_started
 
 volumes:
   pgdata:

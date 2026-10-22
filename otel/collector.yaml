@@ -31,6 +31,13 @@ receivers:
     endpoint: unix:///var/run/docker.sock
     api_version: "1.44"
     collection_interval: 5s
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: nats
+          scrape_interval: 5s
+          static_configs:
+            - targets: ["nats-exporter:7777"]
 
 processors:
   resourcedetection:
@@ -48,6 +55,6 @@ exporters:
 service:
   pipelines:
     metrics:
-      receivers: [hostmetrics, postgresql, docker_stats]
+      receivers: [hostmetrics, postgresql, docker_stats, prometheus]
       processors: [resourcedetection, batch]
       exporters: [otlp]

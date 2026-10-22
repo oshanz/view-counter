@@ -11,6 +11,11 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/oz/view-counter/internal/store"
 )
@@ -22,6 +27,8 @@ const (
 	flushTimeout = 10 * time.Second
 	retryDelay   = 2 * time.Second
 )
+
+var tracer = otel.Tracer("viewcounter/ingest")
 
 // Config names the stream. The zero value uses the production names.
 type Config struct {
@@ -98,12 +105,29 @@ func (q *Queue) Close() { q.nc.Drain() }
 func (q *Queue) Delete(ctx context.Context) error { return q.js.DeleteStream(ctx, q.cfg.Stream) }
 
 // Publish returns once JetStream has stored the hit. The payload is the fixed
-// length fingerprint hash followed by the key.
+// length fingerprint hash followed by the key; the trace context travels in
+// the message headers so the writer can link its batch back to this request.
 func (q *Queue) Publish(ctx context.Context, key string, fpHash []byte) error {
 	if len(fpHash) != fpLen {
 		return fmt.Errorf("fingerprint hash is %d bytes, want %d", len(fpHash), fpLen)
 	}
-	_, err := q.js.Publish(ctx, q.cfg.Subject, append(append(make([]byte, 0, fpLen+len(key)), fpHash...), key...))
+	ctx, span := tracer.Start(ctx, "nats publish",
+		trace.WithSpanKind(trace.SpanKindProducer),
+		trace.WithAttributes(attribute.String("messaging.system", "nats"),
+			attribute.String("messaging.destination.name", q.cfg.Subject)))
+	defer span.End()
+
+	msg := &nats.Msg{
+		Subject: q.cfg.Subject,
+		Data:    append(append(make([]byte, 0, fpLen+len(key)), fpHash...), key...),
+		Header:  nats.Header{},
+	}
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(msg.Header))
+	_, err := q.js.PublishMsg(ctx, msg)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
 	return err
 }
 
@@ -155,9 +179,35 @@ func (q *Queue) flush(msgs []jetstream.Msg, st *store.Store) {
 		valid = append(valid, m)
 	}
 
+	// A batch has many producers. It joins the trace of the first sampled one,
+	// which also makes the batch sampled (a fresh root would be sampled only at
+	// the base rate) and puts the Postgres spans in that trace, and links to the
+	// rest. Every sampled producer also gets an "ingest hit" span in its own
+	// trace, linked to the batch.
 	ctx, cancel := context.WithTimeout(context.Background(), flushTimeout)
 	defer cancel()
+	producers := producerContexts(valid)
+	var links []trace.Link
+	if len(producers) > 0 {
+		ctx = trace.ContextWithRemoteSpanContext(ctx, producers[0])
+		for _, sc := range producers[1:] {
+			links = append(links, trace.Link{SpanContext: sc})
+		}
+	}
+	ctx, span := tracer.Start(ctx, "ingest batch",
+		trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithLinks(links...),
+		trace.WithAttributes(attribute.Int("messaging.batch.message_count", len(hits))))
+	defer span.End()
+	batchLink := trace.Link{SpanContext: span.SpanContext()}
+	for _, sc := range producers {
+		_, hit := tracer.Start(trace.ContextWithRemoteSpanContext(context.Background(), sc), "ingest hit",
+			trace.WithSpanKind(trace.SpanKindConsumer), trace.WithLinks(batchLink))
+		defer hit.End()
+	}
 	if err := st.HitBatch(ctx, hits); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		log.Printf("ingest: write %d hits: %v", len(hits), err)
 		for _, m := range valid {
 			m.NakWithDelay(retryDelay)
@@ -168,6 +218,22 @@ func (q *Queue) flush(msgs []jetstream.Msg, st *store.Store) {
 	for _, m := range valid {
 		m.Ack()
 	}
+}
+
+// producerContexts returns the publish span context of every sampled message.
+func producerContexts(msgs []jetstream.Msg) []trace.SpanContext {
+	var scs []trace.SpanContext
+	for _, m := range msgs {
+		h := m.Headers()
+		if len(h) == 0 {
+			continue
+		}
+		ctx := otel.GetTextMapPropagator().Extract(context.Background(), propagation.HeaderCarrier(h))
+		if sc := trace.SpanContextFromContext(ctx); sc.IsValid() && sc.IsSampled() {
+			scs = append(scs, sc)
+		}
+	}
+	return scs
 }
 
 func decode(m jetstream.Msg) (store.Hit, bool) {
