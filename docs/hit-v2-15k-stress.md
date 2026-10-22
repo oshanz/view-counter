@@ -101,6 +101,27 @@ The dropped-iterations threshold (under 12,000) failed again; latency and failur
 
 Integrity held: the hot key had 802,583 views in Postgres, equal to `acked_hot_hits`, and writer lag was 0 pending, 0 ack_pending after the drain wait.
 
+## 20k with a capped VU pool (2026-10-23)
+
+Same command and script as the lighter-script run above, varying only `MAX_VUS`. One run each, on the shared host. CPU, RAM and traces were not collected.
+
+| | `MAX_VUS=5000` | `MAX_VUS=1000` | `MAX_VUS=500` |
+|---|---|---|---|
+| Throughput | 16.5k/s | 16.4k/s | 17.6k/s |
+| Acked hits | 1,146,545 | 1,130,855 | 1,159,227 |
+| p95 | 64.6 ms | 51.7 ms | 24.1 ms |
+| p99 | 104 ms | 78.2 ms | 36.7 ms |
+| Max | 278 ms | 193 ms | 96 ms |
+| Dropped iterations | 53,523 | 69,153 | 40,773 |
+| Failed requests | 0% | 0% | 0% |
+| VUs used | 1,348 peak | 1,000 (cap) | 495 peak (cap 500) |
+
+The dropped-iterations threshold (under 12,000) failed in all three; latency and failure thresholds passed.
+
+Throughput did not fall when the pool shrank from 5,000 to 1,000, and it rose with 500, while p95 fell from 65 ms to 24 ms. So the roughly 16k/s seen at 5,000 VUs was not a fixed service ceiling: fewer requests in flight on the shared host left more CPU for the service. Throughput at 500 VUs is only 7% above the other two and these are single runs, so the size of the difference is not established. Dropped iterations rose at 1,000 VUs because the pool was exhausted at the cap, which is a k6-side drop; no per-run VU data separates k6-side from service-side drops at 500.
+
+Integrity: the 5,000- and 500-VU runs had the hot key in Postgres equal to `acked_hot_hits` (802,583 and 811,461) and writer lag 0 after the drain. For the 1,000-VU run only `acked_hot_hits` (791,600) was recorded; the Postgres count and lag line were not captured.
+
 ## `/v1/hit` at 20k (2026-10-22, for comparison)
 
 `NATS_URL= STEPS=20000 STEP_DURATION=60s MAX_VUS=5000 loadtest/run.sh loadtest/hit_v1.js`, traces sampled at 1%. `loadtest/hit_v1.js` is `hit_v2.js` pointed at `POST /v1/hit` (expects 204, no drain wait). Same machine and the same uncommitted `ingestWorkers = 1`, which does not affect `/v1`. CPU, RAM and traces were not collected.
@@ -128,7 +149,7 @@ Integrity: the hot key holds 27,202 views in Postgres against 26,872 acked, so 3
 
 ## Next
 
-- Run k6 on another machine, or pin it to separate cores with `taskset`, and repeat three times at 10k, 15k and 20k (20k has two runs so far, with different k6 scripts).
+- Run k6 on another machine, or pin it to separate cores with `taskset`, and repeat three times at 10k, 15k and 20k (20k has four runs so far: two k6 scripts, and three VU caps with the newer one). Try 250 and 100 VUs too, since fewer VUs raised throughput.
 - Capture per-core, per-second CPU during the load (`mpstat -P ALL 1`) to check for a pinned core, such as the one NATS uses for the stream.
 
 ## What changed to collect this
