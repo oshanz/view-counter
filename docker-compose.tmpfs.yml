@@ -1,0 +1,10 @@
+# Benchmark-only override: keeps the JetStream store in RAM so publish acks
+# never wait on disk. Hits still in the stream are lost when nats restarts.
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.tmpfs.yml mise run db
+services:
+  nats:
+    volumes:
+      - type: tmpfs
+        target: /data
+        tmpfs:
+          size: 8589934592 # JetStream may use 75% of this; the stream's MaxBytes is 4 GiB
